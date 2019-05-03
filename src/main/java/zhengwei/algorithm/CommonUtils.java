@@ -5,16 +5,16 @@ package zhengwei.algorithm;
  * @author zhengwei AKA Sherlock
  * @since 2019/4/27 9:51
  */
-public class CommonUtils {
+class CommonUtils {
     /**
      * 交换数据元素位置
-     * @param small 较小元素位置
-     * @param big 较大元素位置
+     * @param front 前一个位置
+     * @param behind 后一个位置
      * @param arr 比较的数组
      */
-    static void swap(int small,int big,int[] arr) {
-        int temp=arr[small];
-        arr[small]=arr[big];
-        arr[big]=temp;
+    static void swap(int front,int behind,int[] arr) {
+        int temp=arr[front];
+        arr[front]=arr[behind];
+        arr[behind]=temp;
     }
 }
