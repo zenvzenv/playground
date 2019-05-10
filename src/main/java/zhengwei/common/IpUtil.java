@@ -1,5 +1,7 @@
 package zhengwei.common;
 
+import org.apache.commons.lang3.StringUtils;
+
 import java.util.regex.Pattern;
 
 /**
@@ -128,5 +130,139 @@ public final class IpUtil {
 			number = number >> 8;
 		}
 		return ip.toString();
+	}
+	/**
+	 * 根据掩码位数获取掩码
+	 */
+	public static String getNetMask(String mask) {
+		int inetMask =Integer.parseInt(mask);
+		if(inetMask > 32){
+			return null;
+		}
+		//子网掩码为1占了几个字节
+		int num1 = inetMask/8;
+		//子网掩码的补位位数
+		int num2 = inetMask%8;
+		int array[] = new int[4];
+		for (int i = 0; i < num1; i++) {
+			array[i] = 255;
+		}
+		for (int i = num1; i < 4; i++) {
+			array[i] = 0;
+		}
+		for (int i = 0; i < num2; num2--) {
+			array[num1] += Math.pow(2, 8-num2);
+		}
+		return array[0] + "." + array[1] + "." + array[2] + "." + array[3];
+	}
+
+	/**
+	 * 根据子网掩码获取起始IP
+	 * @param ipinfo IP段
+	 * @param netMask 子网掩码
+	 * @return 起始IP
+	 */
+	public static String getStartAddr(String ipinfo, String netMask) {
+		String lowAddr = "";
+		int ipArray[] = new int[4];
+		int netMaskArray[] = new int[4];
+		if(4 != ipinfo.split("\\.").length || "".equals(netMask)){
+			return null;
+		}
+		System.out.println(ipinfo);
+		for (int i = 0; i < 4; i++) {
+			try{
+				String s = StringUtils.splitPreserveAllTokens(ipinfo,".")[i];
+				ipArray[i] = Integer.parseInt(s);
+			}catch(NumberFormatException e){
+				String ip = ipinfo.replaceAll("\n", "");
+				ipArray[i] = Integer.parseInt(ip.split("[.]")[i]);
+			}
+			netMaskArray[i] = Integer.parseInt(netMask.split("[.]")[i]);
+			if(ipArray[i] > 255 || ipArray[i] < 0 || netMaskArray[i] > 255 || netMaskArray[i] < 0){
+				return null;
+			}
+			ipArray[i] = ipArray[i]&netMaskArray[i];
+		}
+		//构造最小地址
+		for (int i = 0; i < 4; i++){
+			if(i == 3){
+				ipArray[i] = ipArray[i] + 1;
+			}
+			if ("".equals(lowAddr)){
+				lowAddr +=ipArray[i];
+			} else{
+				lowAddr += "." + ipArray[i];
+			}
+		}
+		return lowAddr;
+	}
+
+	/**
+	 * 获取结束IP
+	 * @param ipinfo IP段
+	 * @param netMask 子网掩码
+	 * @return 结束IP
+	 */
+	public static String getEndAddr(String ipinfo, String netMask) {
+		String lowAddr = getStartAddr(ipinfo, netMask);
+		int hostNumber = getHostNumber(netMask);
+		if("".equals(lowAddr) || hostNumber == 0){
+			return null;
+		}
+		int lowAddrArray[] = new int[4];
+		for (int i = 0; i < 4; i++) {
+			assert lowAddr != null;
+			lowAddrArray[i] = Integer.parseInt(lowAddr.split("\\.")[i]);
+			if(i == 3){
+				lowAddrArray[i] = lowAddrArray[i] - 1;
+			}
+		}
+		lowAddrArray[3] = lowAddrArray[3] + (hostNumber - 1);
+		if(lowAddrArray[3] >255){
+			int k = lowAddrArray[3] / 256;
+			lowAddrArray[3] = lowAddrArray[3] % 256;
+			lowAddrArray[2] = lowAddrArray[2] + k;
+		}
+		if(lowAddrArray[2] > 255){
+			int  j = lowAddrArray[2] / 256;
+			lowAddrArray[2] = lowAddrArray[2] % 256;
+			lowAddrArray[1] = lowAddrArray[1] + j;
+			if(lowAddrArray[1] > 255){
+				int  k = lowAddrArray[1] / 256;
+				lowAddrArray[1] = lowAddrArray[1] % 256;
+				lowAddrArray[0] = lowAddrArray[0] + k;
+			}
+		}
+		String highAddr = "";
+		for(int i = 0; i < 4; i++){
+			if(i == 3){
+				lowAddrArray[i] = lowAddrArray[i] - 1;
+			}
+			if("".equals(highAddr)){
+				highAddr = lowAddrArray[i]+"";
+			}else{
+				highAddr += "." + lowAddrArray[i];
+			}
+		}
+		return highAddr;
+	}
+
+	/**
+	 * 获取实际可使用的IP数量
+	 * @param netMask 子网掩码
+	 * @return 可用的子网数量
+	 */
+	public static int getHostNumber(String netMask) {
+		int hostNumber = 0;
+		int netMaskArray[] = new int[4];
+		for (int i = 0; i < 4 ; i++) {
+			netMaskArray[i] = Integer.parseInt(netMask.split("\\.")[i]);
+			if(netMaskArray[i] < 255){
+				hostNumber =  (int) (Math.pow(256,3-i) * (256 - netMaskArray[i]));
+				break;
+			}
+		}
+		return hostNumber;
 	}
 }
