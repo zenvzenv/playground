@@ -19,14 +19,14 @@ final class TestZookeeper {
     private static final String connectString="hadoopha01:2181,hadoopha02:2181,hadoopha03:2181";
     //超时时间，单位：毫秒
     private static final int sessionTimeout=2000;
-    private ZooKeeper zkClient;
+    private static ZooKeeper zkClient;
 
     /**
      * 初始化zookeeper客户端
      * @throws IOException 异常
      */
     @BeforeAll
-    void init() throws IOException {
+    static void init() throws IOException {
         zkClient =new ZooKeeper(connectString, sessionTimeout, new Watcher() {
             @Override
             public void process(WatchedEvent event) {
