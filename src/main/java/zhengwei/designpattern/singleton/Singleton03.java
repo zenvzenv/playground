@@ -6,15 +6,12 @@ package zhengwei.designpattern.singleton;
  * @since 2019/5/15 12:58
  */
 public class Singleton03 {
-    private static Singleton03 INSTANCE;
-    private Singleton03() {}
-    static class Singleton04Handler {
-        public static Singleton03 getInstance(){
-            return INSTANCE=new Singleton03();
-        }
-    }
 
-    public static void main(String[] args) {
-        Singleton03 instance = Singleton04Handler.getInstance();
+    private Singleton03() {}
+    private static class Singleton04Handler {
+        private static Singleton03 INSTANCE = new Singleton03();
+    }
+    public static Singleton03 getInstance() {
+        return Singleton04Handler.INSTANCE;
     }
 }
