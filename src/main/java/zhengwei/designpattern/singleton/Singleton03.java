@@ -14,4 +14,10 @@ public class Singleton03 {
     public static Singleton03 getInstance() {
         return Singleton04Handler.INSTANCE;
     }
+
+    public static void main(String[] args) {
+        for (int i=0;i<100;i++){
+            new Thread(()-> System.out.println(Singleton03.getInstance().hashCode())).start();
+        }
+    }
 }
