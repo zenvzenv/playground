@@ -24,17 +24,19 @@ class SparkOperator implements Serializable {
     private static JavaSparkContext jsc;
     private static JavaPairRDD<String, Integer> rdd1;
     private static JavaPairRDD<String, String> rdd2;
+    private static JavaRDD<String> rdd3;
     @BeforeAll
     static void getJsc(){
-        SparkConf conf = new SparkConf().setMaster("local").setAppName("test");
+        final SparkConf conf = new SparkConf().setMaster("local").setAppName("test");
         jsc = new JavaSparkContext(conf);
+        //第二个参数可以指定分区数
         rdd1 = jsc.parallelizePairs(Arrays.asList(
                 new Tuple2<>("zw1", 18),
                 new Tuple2<>("zw1", 19),
                 new Tuple2<>("zw2", 20),
                 new Tuple2<>("zw2", 21),
                 new Tuple2<>("zw3", 22),
-                new Tuple2<>("zw3", 23))
+                new Tuple2<>("zw3", 23)),2
         );
         rdd2 = jsc.parallelizePairs(Arrays.asList(
                 new Tuple2<>("zw1", "18"),
@@ -42,8 +44,9 @@ class SparkOperator implements Serializable {
                 new Tuple2<>("zw2", "20"),
                 new Tuple2<>("zw2", "21"),
                 new Tuple2<>("zw3", "22"),
-                new Tuple2<>("zw3", "23"))
+                new Tuple2<>("zw3", "23")),2
         );
+        rdd3 = jsc.parallelize(Arrays.asList("zw1","zw2","zw3","zw4","zw5","zw6","zw7","zw8","zw9","zw10","zw11","zw12"),3);
     }
 
     /**
@@ -94,7 +97,7 @@ class SparkOperator implements Serializable {
 
         //按key进行分组，key相同的rdd将被分到一起
 //        JavaPairRDD<String, Iterable<Integer>> rdd1GroupByKeyRDD = rdd1.groupByKey();
-        /**
+        /*
          * zip算子
          * 将两个RDD压在一起，形成一个新的KV格式RDD
          * 如果两个RDD的分区中的数据条数不一致的话，则会报错
@@ -102,7 +105,7 @@ class SparkOperator implements Serializable {
         JavaPairRDD<Tuple2<String, Integer>, Tuple2<String, String>> zipRDD = rdd1.zip(rdd2);
         //如果这里使用System.out::println的话会报object not serializable错
         zipRDD.foreach((VoidFunction<Tuple2<Tuple2<String, Integer>, Tuple2<String, String>>>) tuple2Tupl2 -> System.out.println(tuple2Tupl2));
-        /**
+        /*
          * 测试zipWithIndex算子
          * 把一个RDD压缩成一个KV格式的一个RDD，并加上下标
          */
@@ -120,5 +123,33 @@ class SparkOperator implements Serializable {
         stringLongMap.forEach((k,v)-> System.out.println("key->"+k+",value->"+v));
         Map<Tuple2<String, Integer>, Long> tuple2LongMap = rdd1.countByValue();
         tuple2LongMap.forEach((k,v)-> System.out.println("key->"+k+",value->"+v));
+    }
+
+    /**
+     * map类算子
+     * foreach类算子
+     */
+    @Test
+    void testMapOperator(){
+        //map算子逐条执行，不区分分区
+        JavaRDD<String> map01 = rdd1.map(record-> {
+            System.out.println(record._1+"===="+record._2);
+            System.out.println("map01 connect to db ...");
+            return record._1+"===="+record._2;
+        });
+        //foreach算子也是逐条执行的，不区分分区
+        map01.foreach(System.out::println);
+        //mapPartitions算子按分区执行，效率要比map算子要高，可以考虑把map算子替换成mapPartitions算子
+        //需要注意的是mapPartitions接受的函数的参数，iter是每个分区中的数据的迭代器，可以遍历这个迭代器获取到分区中的数据，最终返回的是一个iterator
+        JavaRDD<String> map02 = rdd1.mapPartitions(iter -> {
+            List<String> list = new ArrayList<>();
+            iter.forEachRemaining(record -> {
+                list.add(record._1 + "====" + record._2 + 1 + "====");
+                System.out.println("map02 connect to db ...");
+            });
+            return list.iterator();
+        });
+        //foreachPartitions算子是区分分区的，效率要比foreach要高
+        map02.foreachPartition(System.out::println);
     }
 }
