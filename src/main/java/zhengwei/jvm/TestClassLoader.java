@@ -61,7 +61,7 @@ public class TestClassLoader {
     }
 
     /**
-     * 对于数组实例来说，其类型是由jvm在运行期间动态生成的，表示为[Lzhengwei.jvm.Parent
+     * 对于数组实例来说，其类型是由jvm在运行期间动态生成的，一维数组表示为[Lzhengwei.jvm.Parent，二维数组表示为：[[Lzhengwei.jvm.Parent
      * 这种形式，动态生成的类型，其父类就是Object
      * 对于数组而言，JavaDoc经常将构成数组的元素称为Component，实际上就是将一个数据降低一个纬度的类型。
      * 助记符：
@@ -79,8 +79,8 @@ public class TestClassLoader {
     }
 
     /**
-     * 当一个接口初始化时，并不要求其父接口都初始化完成->是因为接口中的都是常量，就算别的类中引用了子类中的常量，子类的常量在编译阶段已经在调用类的常量池中，所以不需要父接口初始化
-     * 接口中默认都是public static final修饰的常量
+     * 当一个接口初始化时，并不要求其父接口都初始化完成->是因为接口中的都是常量(public static final修饰的)，就算别的类中引用了子类中的常量，子类的常量在编译阶段已经在调用类的常量池中，所以不需要父接口初始化
+     * 虽然JVM会加载ChildInterface和ParentInterface但并不代表着JVM会去初始化这两个接口
      * 只有真正使用到父接口的时候(如引用父接口中定义的常量时)才会初始化
      */
     @Test
@@ -100,17 +100,43 @@ class Parent{
     static {
         System.out.println("parent static block");
     }
+    {
+        System.out.println("parent block");
+    }
 }
-class Child extends Parent{
+class Child extends Parent implements ChildInterface{
     public static /*final*/ String str2 = "child";
     static {
         System.out.println("child static block");
     }
+    {
+        System.out.println("child block");
+    }
 }
+
+/**
+ * 注意：Java中允许非静态代码块的出现
+ * 区别就在于静态代码块只有在类初始化的时候执行一次，下次再去初始化类的时候不会再去执行了
+ * 而非静态代码块在类每次初始化的时候都会去执行一遍，非静态代码块在构造函数之前执行
+ */
 interface ParentInterface{
+    /**
+     * 如果ParentInterface被初始化了的话，那么thread这个常量就会赋值
+     * 那么线程中的代码块就会被执行，从而可以证明相关结论
+     */
+    Thread threadParent=new Thread(){
+        {
+            System.out.println("ParentInterface invoke");
+        }
+    };
     int ap=5;
 }
 interface ChildInterface extends ParentInterface{
     int ac=6;
     String bc=UUID.randomUUID().toString();
+    Thread threadChild=new Thread(){
+        {
+            System.out.println("ChildInterface invoke");
+        }
+    };
 }
