@@ -39,8 +39,8 @@ public class LeetCode01TwoSum {
             int firstNum = nums[i];
             int secondNum = target - firstNum;
             if (map.containsKey(secondNum)){
-                result[0]=i;
-                result[1]=map.get(secondNum);
+                result[1]=i;
+                result[0]=map.get(secondNum);
             } else map.put(firstNum,i);
         }
         return result;
