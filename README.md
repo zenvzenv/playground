@@ -4,7 +4,7 @@
 * HttpAPIClient-http请求工具包
 * IpUtil-IP格式的互转和IP地址的一些判断
 * SysUtils-判断一个对象是否为空
-### 2.gc目录---更名为--->jvm目录(下次提交将直接改为jvm)
+### 2.jvm目录
 * TestGC-->学习JVM的时候测试GC的一些代码
 * TestClassLoader,TestClassLoader2-->学习JVM中类加载过程时测试的亿写实例代码，有代码的帮助，理解起来会更加的透彻
     > 类的加载过程是:加载->链接->初始化->使用->卸载<br/>
