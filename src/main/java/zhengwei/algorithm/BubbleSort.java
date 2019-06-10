@@ -14,10 +14,31 @@ import java.util.Arrays;
 public class BubbleSort {
     public static void main(String[] args) {
         int[] arr=new int[]{1,5,3,4,6,7,8,1,2,3,9};
-        for (int i = arr.length-1; i > 0; i--) {
+        /*for (int i = arr.length-1; i > 0; i--) {
             for (int j = 0; j < i; j++) {
                 if (arr[j] > arr[j+1]) CommonUtils.swap(j+1, j, arr);
             }
+        }
+        System.out.println(Arrays.toString(arr));*/
+        bubbleSort(arr);
+    }
+
+    /**
+     * 优化的冒泡排序
+     * 只要本趟排序发生了交换就把flag置为true，这样在可以减少循环次数
+     * @param arr 要排序的数组
+     */
+    static void bubbleSort(int[] arr){
+        boolean flag;
+        for (int i=0;i<arr.length-1;i++){//趟数
+            flag=false;
+            for (int j=arr.length-1;j>i;j--){
+                if (arr[j]<arr[j-1]) {
+                    CommonUtils.swap(j-1,j,arr);
+                    flag=true;
+                }
+            }
+            if (!flag) break;
         }
         System.out.println(Arrays.toString(arr));
     }
