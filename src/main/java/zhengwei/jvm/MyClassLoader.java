@@ -109,7 +109,25 @@ public class MyClassLoader extends ClassLoader {
         System.out.println("object1:"+o1);
         System.out.println("object1 classloader"+o1.getClass().getClassLoader());
         System.out.println("=====================================================");
-        MyClassLoader loader2=new MyClassLoader(loader1,"loader2");
+
+        /*
+         * +XX:+TraceClassUnloading:监控被卸载的类
+         */
+        loader1=null;//gc helper
+        clazz1=null;//ge helper
+        o1=null;//gc helper
+        System.gc();//第一次被加载的TestClassLoader被卸载了
+
+        loader1=new MyClassLoader("loader1");
+        loader1.setPath("E:/temp/");
+        clazz1 = loader1.loadClass("zhengwei.jvm.TestClassLoader");
+        System.out.println("class hashcode:"+clazz1.hashCode());
+        o1 = clazz1.newInstance();
+        System.out.println("object1:"+o1);
+        System.out.println("object1 classloader"+o1.getClass().getClassLoader());
+        System.out.println("=====================================================");
+
+        /*MyClassLoader loader2=new MyClassLoader(loader1,"loader2");
         loader2.setPath("E:/temp/");
         Class<?> clazz2 = loader2.loadClass("zhengwei.jvm.TestClassLoader");
         System.out.println("class hashcode:"+clazz2.hashCode());
@@ -124,13 +142,14 @@ public class MyClassLoader extends ClassLoader {
         Object o3 = clazz2.newInstance();//class对象的实例
         System.out.println("object3:"+o3);
         System.out.println("object3 classloader"+o3.getClass().getClassLoader());
-        System.out.println("=====================================================");
+        System.out.println("=====================================================");*/
         /*
          * 总结：
          *		每个类加载器的命名空间是不同的。
-         * 		在不同的命名空间中，相同的可以被加载多次即在不同的命名空间中相同的类可以同时被加载(例如loader1和loader3)
+         * 		在不同的命名空间中，相同的类可以被加载多次即在不同的命名空间中相同的类可以同时被加载(例如loader1和loader3)
          * 		在相同的命名空间中相同的类只会被加载一次
          *		如果一个类已经被加载完毕之后，那么下次将不会再去加载这个类，而是直接返回之前加载好的class(loadClass会先调用findLoadedClass(name)去寻找已经加载好的类)
+         *      双亲委托机制即一个类加载器会首先去委托它的父类加载器，如果父类加载器加载不了的话，才会由自身类加载器去加载。
          */
     }
 }
