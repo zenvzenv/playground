@@ -5,6 +5,12 @@ package zhengwei.jvm;
  * @since 2019/6/10 18:17
  */
 public class MySample {
+	private MySample mySample;
+
+	public void setMySample(Object mySample) {
+		this.mySample = (MySample) mySample;
+	}
+
 	public MySample(){
 		System.out.println("MySample is loaded by :"+this.getClass().getClassLoader());
 		//注意：加载了MySample的类加载器会继续去加载MyCat，也会遵循双亲委托机制
