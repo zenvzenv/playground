@@ -11,6 +11,9 @@ import java.util.Objects;
  * @since 2019/5/29 10:16
  */
 public class TestClassLoader3 {
+    static {
+        System.out.println("TestClassLoader3 init...");
+    }
     public static void main(String[] args) throws ClassNotFoundException {
         /*
          * 如果String是被Bootstrap Classloader加载的，那么它的类加载器将返回null
@@ -88,7 +91,7 @@ public class TestClassLoader3 {
 
         Class<?> clazz1 = loader1.loadClass("zhengwei.jvm.MySample");
         Class<?> clazz2 = loader2.loadClass("zhengwei.jvm.MySample");
-        //输出true，系统类加载器加载了TestGC，下次加载只会返回已经加载好的类对象
+        //输出true，系统类加载器加载了MySample，下次加载只会返回已经加载好的类对象
         System.out.println(clazz1==clazz2);
 
         Object o1 = clazz1.newInstance();
@@ -108,7 +111,15 @@ public class TestClassLoader3 {
      * 6.父类加载器加载的类看不到子类加载器加载的类
      * 7.如果两个加载器没有直接或间接的关系，那么两个加载器各自加载的类互不可见
      * java.lang.ClassCastException: zhengwei.jvm.MySample cannot be cast to zhengwei.jvm.MySample
-     * @throws Exception
+     * @throws Exception 异常
+     *
+     * 使用双亲委托机制的好处
+     *  1.可以确保Java核心类库的类型安全：所有Java应用都至少会引用java.lang.Object类，也就是说或在运行期间，java.lang.Object会被加载到JVM中，
+     *    如果这个加载过程由Java应用自己的类加载器去完成，那么很有可能在JVM内存中存在多个版本的java.lang,.Object类，而且这些类是不兼容的，相互不可见的(命名空间在起作用)
+     *    借助于双亲委托机制，Java核心类库中的类加载工作由启动类加载器去完成加载，从而确保Java应用所使用的都是统一版本的Java类库。
+     *  2.可以确保Java核心类库不会被自定义的类所替代
+     *  3.不同的类加载器可以为相同的名称(binary name)的类创建额外的命名空间，相同名称的类可以并存在JVM中，只要用不同的类加载器去加载它们即可。不同的类加载器加载器的类是不兼容的，
+     *    这就相当于在JVM中创建了一个又一个相互隔离的Java类空间，这类技术在很多框架中都的得到实际应用。
      */
     @Test
     void testClassLoaderNamespace() throws Exception{
@@ -118,7 +129,7 @@ public class TestClassLoader3 {
         loader2.setPath("e:/temp/");
         Class<?> clazz1 = loader1.loadClass("zhengwei.jvm.MySample");
         Class<?> clazz2 = loader2.loadClass("zhengwei.jvm.MySample");
-        //输出true，系统类加载器加载了TestGC，下次加载只会返回已经加载好的类对象
+        //输出false，系统类加载器加载了MySample，下次加载只会返回已经加载好的类对象
         System.out.println(clazz1==clazz2);
 
         Object o1 = clazz1.newInstance();
@@ -127,6 +138,16 @@ public class TestClassLoader3 {
         Method method = clazz1.getMethod("setMySample", Object.class);
         //第一个参数：调用对象的方法，第二个参数：方法所需参数
         method.invoke(o1,o2);
+    }
+
+    /**
+     * 扩展类加载器需要把class文件打进jar包中才会去加载
+     */
+    @Test
+    void testExtClassLoader(){
+        System.out.println(TestClassLoader3.class.getClassLoader());
+        System.setProperty("java.ext.paths","e:/temp");
+        System.out.println(MyClassLoader.class.getClassLoader());
     }
 }
 class C{
