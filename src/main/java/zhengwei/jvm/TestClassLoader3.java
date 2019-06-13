@@ -2,6 +2,7 @@ package zhengwei.jvm;
 
 import com.sun.crypto.provider.AESKeyGenerator;
 import org.junit.jupiter.api.Test;
+import sun.misc.Launcher;
 
 import java.lang.reflect.Method;
 import java.util.Objects;
@@ -67,10 +68,33 @@ public class TestClassLoader3 {
      */
     @Test
     void testBootClassLoader() throws ClassNotFoundException {
+    	/*
+    	在Oracle的HotSpot中，系统属性sun.boot.class.path设置错了的话，则运行会出错，提示如下错误：
+    	Error occurred during initialization of VM
+		java/lang/NoClassDefFoundError: java/lang/Object
+    	 */
         System.out.println(System.getProperty("sun.boot.class.path"));
         System.out.println(System.getProperty("java.ext.dirs"));
         System.out.println(System.getProperty("java.class.path"));
+        /*
+        特别说明：
+            内建于JVM中的启动类加载器(BootstrapClassLoader)会加载java.lang.ClassLoader以及其他的Java平台类
+            当JVM启动时，一块特殊的机器码会运行，它会加载扩展类加载器和应用类加载器
+            这块特殊的机器码叫做启动类加载器
+
+            启动类加载器并不是Java类，而其他加载器都是Java类
+            启动类加载器是特定的平台机器码，它负责开启整个加载过程
+
+            所有类加载器(除了启动类加载器)都被实现为Java类。不过，总归要有第一个组件来加载第一个Java类加载器，从而让整个加载过程进行下去，
+            加载第一个纯Java类加载器就是启动类加载器的职责。
+
+            启动类加载器还会负责加载供JRE正常运行的基本组件，还包括java.util和java.lang包中的类
+         */
+        System.out.println(ClassLoader.class.getClassLoader());//null，由启动类加载器加载
         MyClassLoader loader1=new MyClassLoader("loader1");
+        System.out.println(Launcher.class.getClassLoader());//null，由启动类加载器加载
+        //获取应用类加载器(重要)
+        System.out.println(ClassLoader.getSystemClassLoader());
         loader1.setPath("e:/temp/");
         Class<?> clazz = loader1.loadClass("zhengwei.jvm.TestClass");
         System.out.println("class : "+clazz.hashCode());
@@ -111,6 +135,8 @@ public class TestClassLoader3 {
      * 6.父类加载器加载的类看不到子类加载器加载的类
      * 7.如果两个加载器没有直接或间接的关系，那么两个加载器各自加载的类互不可见
      * java.lang.ClassCastException: zhengwei.jvm.MySample cannot be cast to zhengwei.jvm.MySample
+     * 在运行期，一个Java类是由该类的完全限定名(binary name，二进制名)和用于加载该类的定义类加载器(defining loader)所共同决定的
+     * 如果同样名字(即相同的完全限定名)的类是由两个不同的类加载器加载，那么这些类就是不同的，即便.class文件时一样的，并且从相同的位置加载也是如此
      * @throws Exception 异常
      *
      * 使用双亲委托机制的好处
