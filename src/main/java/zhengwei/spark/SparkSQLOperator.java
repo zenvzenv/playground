@@ -2,14 +2,15 @@ package zhengwei.spark;
 
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
-import org.apache.spark.sql.Dataset;
-import org.apache.spark.sql.Row;
-import org.apache.spark.sql.SparkSession;
+import org.apache.spark.sql.*;
+import org.apache.spark.sql.types.DataTypes;
+import org.apache.spark.sql.types.StructField;
+import org.apache.spark.sql.types.StructType;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
-import java.util.Arrays;
+import java.util.*;
 
 /**
  * 学习Spark SQL
@@ -33,6 +34,7 @@ public class SparkSQLOperator {
                 .master("local")
                 .appName("SparkSQL")
                 .config("spark.some.config.option","some-value")
+                .config("spark.sql.shuffle.partitions",1)//配置join或者聚合操作shuffle数据时分区的数量，数据量大时可以调大这个参数，默认200
                 .getOrCreate();
         //创建spark core上下文
         jsc = new JavaSparkContext(spark.sparkContext());
@@ -124,7 +126,7 @@ public class SparkSQLOperator {
      */
     @Test
     void ordinaryRDDToDataset(){
-        JavaRDD<String> rdd1 = jsc.textFile("src/main/resources/input/SparkGroupByKeyTopN.zw");
+        JavaRDD<String> rdd1 = jsc.textFile("src/main/resources/input/SparkSQLOrdinaryFile.zw");
         JavaRDD<Person> personRdd = rdd1.map(line -> {
             String[] split = line.split("[ ]");
             return new Person(split[0], Integer.parseInt(split[1]));
@@ -136,6 +138,92 @@ public class SparkSQLOperator {
          */
         Dataset<Row> df = spark.createDataFrame(personRdd,Person.class);
         df.show();
+    }
+
+    /**
+     * 通过动态的Schema创建DataFrame
+     */
+    @Test
+    void createDataFrameByDynamicSchema(){
+        JavaRDD<String> lines = jsc.textFile("src/main/resources/input/SparkSQLOrdinaryFile.zw");
+        JavaRDD<Row> rowRDD = lines.map(line -> RowFactory.create(
+                line.split("[ ]")[0],
+                line.split("[ ]")[1]
+        ));
+        //动态创建DataFrame中的元数据，一般来说这里的字段来源于字符串，也可以源自外部数据库
+        //创建Row的字段顺序要和动态Schema的顺序一致，并且表头字段不会按照ASCII排序
+        List<StructField> schemaInfo = Arrays.asList(
+                DataTypes.createStructField("name", DataTypes.StringType, true),
+                DataTypes.createStructField("age", DataTypes.StringType, true)
+        );
+        StructType schema = DataTypes.createStructType(schemaInfo);
+        Dataset<Row> df = spark.createDataFrame(rowRDD, schema);
+        df.show();
+    }
+
+    /**
+     * 将DataFrame保存成parquet格式的文件
+     */
+    @Test
+    void saveAsParquet(){
+        JavaRDD<String> jsonRDD = jsc.textFile("src/main/resources/input/SparkSQlTestFile.zw");
+        Dataset<Row> df = spark.read().json(jsonRDD);
+        /*
+        Append,追加
+        Overwrite,覆盖
+        ErrorIfExists,如果存在就报错
+        Ignore,如果存在就忽略
+         */
+        df.write().mode(SaveMode.Overwrite).format("parquet").save("src/main/resources/input/SparkSQLParquet");
+    }
+
+    /**
+     * 从parquet读取并加载成DataFrame
+     */
+    @Test
+    void readFromParquet(){
+        //两种方式是一样的
+        spark.read().parquet("src/main/resources/input/SparkSQLParquet").show();
+        spark.read().format("parquet").load("src/main/resources/input/SparkSQLParquet").show();
+    }
+    @Test
+    void createDFFromJDBC(){
+
+        /*
+        第一种方式读取MySQL数据库表，加载DataFrame
+         */
+        Map<String,String> map=new HashMap<>();
+        map.put("url","jdbc:mysql://127.0.0.1:3306/test");
+        map.put("username","username");
+        map.put("password","password");
+        map.put("dbtable","person");
+        Dataset<Row> person = spark.read().format("jdbc").options(map).load();
+        person.show();
+        person.registerTempTable("person");
+        /*
+        第二中方式读取mysql数据库表，加载DataFrame
+         */
+        DataFrameReader reader = spark.read().format("jdbc");
+        reader.option("url","jdbc:mysql://127.0.0.1:3306/test");
+        reader.option("username","username");
+        reader.option("password","password");
+        reader.option("dbtable","person");
+        Dataset<Row> score = reader.load();
+        score.show();
+        score.registerTempTable("score");
+        Dataset<Row> result = spark.sql("select person.id,person.name,person.age,score.score from person,score where person.name=score.name");
+        result.show();
+        //将DataFrame存储到MySQL中
+        Properties properties=new Properties();
+        properties.put("user","username");
+        properties.put("password","password");
+        /*
+        Append,追加
+        Overwrite,覆盖
+        ErrorIfExists,如果存在就报错
+        Ignore,如果存在就忽略
+         */
+        result.write().mode(SaveMode.Overwrite).jdbc("jdbc:mysql://127.0.0.1:3306/test","result",properties);
     }
     @AfterAll
     static void end(){
