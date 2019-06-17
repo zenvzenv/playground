@@ -104,6 +104,8 @@ public class ThreadContextClassLoader implements Runnable{
 		在MySQL的jar包中，有这样一个文件夹/META-INF/services，这里面存放一个文件
 		这个文件名字就是需要实现的接口，这个文件里面的内容是实现了这个接口的实现类的二进制名字
 		这样ServiceLoader就可以自己寻找到需要加载的类了，然后去加载。
+		DriverManager.isDriverAllowed(Driver driver, ClassLoader classLoader)->result = ( aClass == driver.getClass() ) ? true : false;
+		判断是否时同一个类加载器加载。
 		 */
 		Class.forName("com.mysql.jdbc.Driver");
 		Connection connection = DriverManager.getConnection("xxx", "username", "password");
