@@ -32,6 +32,7 @@ public class TestClassLoader3 {
 
     /**
      * JVM中类加载器的层次关系：Bootstrap ClassLoader->ExtClassLoader->AppClassLoader
+     * 这三个类加载器并不是父子关系。而是包含关系，除了BootstrapClassLoader是没有父类的，其余的类加载器都只包含一个父类
      * 在有些实现中BootstrapClassLoader会用null表示
      */
     @Test
@@ -102,6 +103,9 @@ public class TestClassLoader3 {
 
         AESKeyGenerator aesKeyGenerator=new AESKeyGenerator();
         System.out.println(aesKeyGenerator.getClass().getClassLoader());//ExtClassLoader
+        System.out.println(aesKeyGenerator.getClass().getClassLoader().getParent());//ExtClassLoader由BootstrapClassLoader加载
+
+//        Class<?> callerClass = Reflection.getCallerClass();
     }
 
     /**
