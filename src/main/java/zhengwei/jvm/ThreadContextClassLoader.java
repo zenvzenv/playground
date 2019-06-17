@@ -90,8 +90,21 @@ public class ThreadContextClassLoader implements Runnable{
 		System.out.println("current thread class loader :"+Thread.currentThread().getContextClassLoader());
 		System.out.println("ServiceLoader class loader :"+ServiceLoader.class.getClassLoader());
 	}
+
+	/**
+	 * 根据jdbc的实现来看线程上下文类加载器的作用
+	 * @throws Exception 异常
+	 */
 	@Test
 	void testJDBC() throws Exception {
+		/*
+		起始在JDK1.6版本以后我们就可以不用再写这行代码了。
+		由于ServiceLoader的存在，ServiceLoader会去当前线程上下文类加载器去加载类
+		这个线程上下文类加载器一般是应用类加载器，应用类加载器会去classpath下寻找相应的类并加载
+		在MySQL的jar包中，有这样一个文件夹/META-INF/services，这里面存放一个文件
+		这个文件名字就是需要实现的接口，这个文件里面的内容是实现了这个接口的实现类的二进制名字
+		这样ServiceLoader就可以自己寻找到需要加载的类了，然后去加载。
+		 */
 		Class.forName("com.mysql.jdbc.Driver");
 		Connection connection = DriverManager.getConnection("xxx", "username", "password");
 	}
