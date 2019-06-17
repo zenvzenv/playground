@@ -27,12 +27,22 @@ public class MyClassLoader extends ClassLoader {
 
     /**
      * 构造方法：显示指定父加载器，并指定加载器的名字
-     * @param parent
-     * @param classLoaderName
+     * @param parent 父加载器
+     * @param classLoaderName 自定义类加载器的名字
      */
     public MyClassLoader(ClassLoader parent,String classLoaderName){
         super(parent);//显示指定该类的父加载器
         this.classLoaderName=classLoaderName;
+    }
+
+    /**
+     * 如果显示指定了java.system.class.loader为我们自定义的类加载器的话
+     * 需要有一个接受一个ClassLoader参数的构造函数
+     * 具体参见ClassLoader.SystemClassLoaderAction
+     * @param parent 父类加载器
+     */
+    public MyClassLoader(ClassLoader parent){
+        super(parent);
     }
 
     /**
