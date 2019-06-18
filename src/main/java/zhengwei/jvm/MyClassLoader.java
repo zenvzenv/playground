@@ -121,7 +121,7 @@ public class MyClassLoader extends ClassLoader {
         System.out.println("=====================================================");
 
         /*
-         * +XX:+TraceClassUnloading:监控被卸载的类
+         * -XX:+TraceClassUnloading:监控被卸载的类
          */
         loader1=null;//gc helper
         clazz1=null;//ge helper
