@@ -38,6 +38,14 @@ public class TestClassLoader3 {
     @Test
     void testParentClassLoader(){
         ClassLoader classLoader = ClassLoader.getSystemClassLoader();
+        /*
+        因为AppClassLoader和ExtClassLoader是Launcher的内部类
+        Launcher再让rt.jar中，是由Bootstrap ClassLoader加载的
+        每个类都会用加载自身的类加载器去加载该类依赖的其他类(前提是依赖的类还没有被加载)
+        那么Bootstrap ClassLoader也会去加载AppClassLoader和ExtClassLoader
+         */
+        System.out.println("AppClassLoader->"+classLoader.getClass()+"--"+classLoader.getClass().getClassLoader());//应用类加载器是由根类加载器加载的,null
+        System.out.println("ExtClassLoader->"+classLoader.getParent().getClass()+"--"+classLoader.getParent().getClass().getClassLoader());//扩展类加载器由根类加载器加载，null
         System.out.println(classLoader);
         while (!Objects.isNull(classLoader)){
             classLoader=classLoader.getParent();
@@ -46,7 +54,7 @@ public class TestClassLoader3 {
     }
 
     /**
-     * CLassLoader JavaDoc
+     * ClassLoader JavaDoc
      * 数组的class对象不是由ClassLoader创建的，而是由JVM在运行期间自动创建的，
      */
     @Test
@@ -97,7 +105,7 @@ public class TestClassLoader3 {
         //获取应用类加载器(重要)
         System.out.println(ClassLoader.getSystemClassLoader());
         loader1.setPath("e:/temp/");
-        Class<?> clazz = loader1.loadClass("zhengwei.jvm.TestClass");
+        Class<?> clazz = loader1.loadClass("zhengwei.jvm.TestByteCode");
         System.out.println("class : "+clazz.hashCode());
         System.out.println("class loader : "+clazz.getClassLoader());
 
