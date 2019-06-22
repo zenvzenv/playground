@@ -1,4 +1,4 @@
-package zhengwei.jvm;
+package zhengwei.jvm.gc;
 
 /**
  * @author zhengwei AKA Sherlock
