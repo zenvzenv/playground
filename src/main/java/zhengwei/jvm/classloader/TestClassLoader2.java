@@ -1,4 +1,4 @@
-package zhengwei.jvm;
+package zhengwei.jvm.classloader;
 
 /**
  * 类加载过程:加载->连接(验证->准备->解析)->初始化->使用->卸载

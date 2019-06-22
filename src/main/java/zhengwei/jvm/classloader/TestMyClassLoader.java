@@ -1,4 +1,4 @@
-package zhengwei.jvm;
+package zhengwei.jvm.classloader;
 
 /**
  * 类加载器命名空间
@@ -11,7 +11,7 @@ public class TestMyClassLoader {
 	public static void main(String[] args) throws Exception {
 		MyClassLoader loader1=new MyClassLoader("loader1");//系统类加载器将会作为loader1的父加载器
 		loader1.setPath("E:/temp/");
-		Class<?> clazz = loader1.loadClass("zhengwei.jvm.MySample");
+		Class<?> clazz = loader1.loadClass("zhengwei.jvm.classloader.MySample");
 		System.out.println("class hash code is "+clazz.hashCode());
 		/*
 		如果注释掉这句话，那么就不会实例化MySample对象，即MySample就不会实例化，构造方法就不会被调用

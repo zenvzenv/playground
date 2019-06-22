@@ -1,4 +1,4 @@
-package zhengwei.jvm;
+package zhengwei.jvm.classloader;
 
 import java.io.*;
 
@@ -113,7 +113,7 @@ public class MyClassLoader extends ClassLoader {
          */
 //        loader.setPath("target/classes/zhengwei/jvm");
         loader1.setPath("E:/temp/");
-        Class<?> clazz1 = loader1.loadClass("zhengwei.jvm.TestClassLoader");
+        Class<?> clazz1 = loader1.loadClass("zhengwei.jvm.classloader.TestClassLoader");
         System.out.println("class hashcode:"+clazz1.hashCode());
         Object o1 = clazz1.newInstance();
         System.out.println("object1:"+o1);
@@ -130,7 +130,7 @@ public class MyClassLoader extends ClassLoader {
 
         loader1=new MyClassLoader("loader1");
         loader1.setPath("E:/temp/");
-        clazz1 = loader1.loadClass("zhengwei.jvm.TestClassLoader");
+        clazz1 = loader1.loadClass("zhengwei.jvm.classloader.TestClassLoader");
         System.out.println("class hashcode:"+clazz1.hashCode());
         o1 = clazz1.newInstance();
         System.out.println("object1:"+o1);
