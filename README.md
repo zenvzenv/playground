@@ -6,7 +6,7 @@
 * SysUtils-判断一个对象是否为空
 ### 2.jvm目录
 * TestGC-->学习JVM的时候测试GC的一些代码
-* TestClassLoader,TestClassLoader2,TestClassLoader3,ThreadContextClassLoader,MyClassLoader-->学习JVM中类加载过程时测试时写的实例代码，有代码的帮助，理解起来会更加的透彻
+* zhengwei.jvm.classloader-->学习JVM中类加载过程时测试时写的实例代码，有代码的帮助，理解起来会更加的透彻
     > 类的加载过程是:加载->链接->初始化->使用->卸载<br/>
     > 其中链接分为:验证->准备->解析<br/>
     __需要特别注意的是准备和初始化是两个过程__<br/>
@@ -35,9 +35,9 @@
             7. 类加载器的**命名空间**：
                 1. 每个类加载器都有自己的命名空间，**命名空间由该类加载器及其所有父类加载器加载的类组成**。
                 2. 在同一个命名空间中，不会出现类的全限定名相同的两个类。
-                3. 在不同的命名空间中，可能出现类的全限定名相同的两个类。[TestClassLoader3](zhengwei.jvm.TestClassLoader3.testClassLoaderNamespace)
+                3. 在不同的命名空间中，可能出现类的全限定名相同的两个类。[zhengwei.jvm.classloader.TestClassLoader3.testClassLoaderNamespace]
                 4. **子类加载器的命名空间包含所有父类加载器的命名空间**。因此由子类加载器加载的类能够访问到父类加载器加载的类，但是父类加载器是访问不到子类加载器加载的类的，例如扩展类加载器能够访问到根类加载器加载的类。
-                5. 如果两个加载器之间没有直接或间接的关系，那么它们各自加载的类将互不可见。[TestClassLoader3](zhengwei.jvm.TestClassLoader3.testClassLoaderNamespace)
+                5. 如果两个加载器之间没有直接或间接的关系，那么它们各自加载的类将互不可见。[zhengwei.jvm.classloader.TestClassLoader3.testClassLoaderNamespace]
             8. 创建自定义类加载器，只需要继承 `java.lang.ClassLoader` 类，然后重写 `findClass(String name)` 方法即可，该方法根据指定的类的二进制名字，返回对应的Class对象的引用。
     2. 链接：将类与类之间的关系处理好
         1. 验证：校验.class文件的正确性；语义检查；字节码验证和二进制兼容性验证，把加载的类的二进制文件合并到JVM中去。
@@ -48,15 +48,18 @@
             1. 创建的类的实例
             2. 访问某个类或接口的静态变量(字节码中使用`getstatic`标记)，或者对静态变量进行赋值(字节码中使用`putstatic`标记)，或者调用类的静态方法(字节码中使用`invokestatic`)
             3. 反射Class.forName("zhengwei.jvm.Test");调用一个参数的Class.forName("xxxxx");是会默认初始化该类的，源码中是有体现的。
-                >`public static Class<?> forName(String className)
-                                 throws ClassNotFoundException {
+                ```java
+                public static Class<?> forName(String className) throws ClassNotFoundException {
                          Class<?> caller = Reflection.getCallerClass();
                          return forName0(className, true, ClassLoader.getClassLoader(caller), caller);
-                }`
-                >`private static native Class<?> forName0(String name, boolean initialize,
+                }
+                ```
+                ```java
+                private static native Class<?> forName0(String name, boolean initialize,
                                                              ClassLoader loader,
                                                              Class<?> caller)
-                throws ClassNotFoundException;`
+                throws ClassNotFoundException;
+                ```
             4. 初始化一个类的子类，同时也会初始化这个类的父类，如果父类还有父类，那么会继续初始化父类的父类直到最顶级的父类。这条规则不适用于接口。
             5. JVM启动时被表明启动类的类，包含main方法的类。
             6. JDK1.7支持动态语言调用。
@@ -84,7 +87,28 @@
         2. 一个类何时结束生命周期取决于代表它的class对象何时结束生命周期。
         3. 由Java虚拟机自带的类加载器加载的类，在虚拟机周期中始终不会被卸载。Java自带的虚拟机：Bootstrap ClassLoader,ExtClassLoader和AppClassLoader。JVM会始终保持对这些类加载器的引用，而这些类加载器也会保持它们所加载类的class对象的引用，因此这些class对象始终是可触及的。
         4. 由用户自定义的类加载器加载的类是可以被卸载的。
-**值得注意的是：类在准备和初始化阶段中，在执行为静态变量赋值遵循从上到下的顺序执行具体实例参见[TestClassLoader2.java](zhengwei.jvm.TestClassLoader2)**
+* zhengwei.jvm.bytecode->学习Java字节码时敲的一些实例代码
+    1. 可以使用 `javap -verbose -p` 命令来分析一个class文件，将会分析文件中的魔数、版本号、常量池、类信息、类构造方法和成员变量。
+    2. 魔数：所有的.class文件前四个字节为魔数，魔数的固定值是 `0xCAFEBABE`
+    3. 魔数之后的四个字节是版本信息，前两个字节是minor version，后两个字节是major version，可以使用 `java -version` 来验证这一点。
+    4. 常量池(constant pool)：紧接着版本号之后的就是常量池入口，一个Java类中定义的很多信息都由常量池来维护和描述，可以将常量池看作是class文件的资源仓库，比如Java中的定义的方法和变量信息都存储在常量池中。<br/>
+       常量池中主要存储两类常量：字面量和符号引用。**字面量就是文本字符串，Java中被申明成final的常量值；而符号引用是如类和接口的全限定名，字段的名称和描述符，方法的名称和描述符**。
+    5. 常量池的总体结构：Java类所对应的常量池主要由常量池数量和常量池表组成。常量池的数量紧跟在版本号之后，占据两个字节；常量池表紧跟在常量池数量之后，常量数组表与一般的数组不同，<br/>
+       常量数组中都是不同的元素类型、结构不同的，长度自然也会不同，但是每一种元素的第一个数据都是u1类型的，该字节是个标志位，占据一个字节。JVM会根据这个标志位来获取元素的具体元素<br/>
+       值得注意的是：**常量池中元素的个数=常量池数量-1(其中0暂时不使用)**，目的是满足某些常量池索引值的数据在特定情况下需要表达“不引用任何一个常量池”的含义；根本原因在于，索引0也是一个常量(保留常量)，只不过它不位于常量池中，这个常量-> l就对应null值，**常量池的索引从1而非0开始**。
+    6. 在JVM规范中，每个变量/字段都有描述信息，描述信息主要是描述字段的数据类型、方法的参数列表(包括数量、类型与顺序)与返回值。根据描述规则，基本数据类型和代表无返回值的void类型都用一个大写字母表示，对象类型使用大写的L加上对象的全限定名表示。<br/>
+       >`B -> byte`<br/>
+       `C -> char`<br/>
+       `F -> float`<br/>
+       `I -> int`<br/>
+       `J -> long`<br/>
+       `S -> short`<br/>
+       `Z -> boolean`<br/>
+       `V -> void`<br/>
+       `L -> 对象，例如: Ljava/lang/Object;`
+    7. 对于数组类型来说，每一个维度都使用一个前置的 `[` 来表示，如 `int[]` 表示成 `[I;`， `String[][]` 表示成 `[[java/lang/String;`
+    8. 描述方法时，按照先参数列表后返回值类型的顺序来描述，参数列表被严格定义在 `()` 中，如方法 `String getRealNameByIdAndNickName(int id, String nickNamw)` 表示成 `(I, Ljava/lang/String;)Ljava/lang/String;`
+**值得注意的是：类在准备和初始化阶段中，在执行为静态变量赋值遵循从上到下的顺序执行具体实例参见[zhengwei.jvm.classloader.TestClassLoader2]**
 * 类和接口在加载的时候有一些不同，JVM在初始化一个类时，要求它的全部父类全部初始化完毕，但是这条规则不适用于接口
     1. 初始化一个类时，并不会初始化它所有实现的接口
     2. 在初始化一个接口时，并不会先去初始化它的父接口<br/>
