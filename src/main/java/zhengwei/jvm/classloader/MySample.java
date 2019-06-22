@@ -1,4 +1,4 @@
-package zhengwei.jvm;
+package zhengwei.jvm.classloader;
 
 /**
  * @author zhengwei AKA Sherlock

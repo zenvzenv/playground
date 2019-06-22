@@ -1,4 +1,4 @@
-package zhengwei.jvm;
+package zhengwei.jvm.classloader;
 
 import org.junit.jupiter.api.Test;
 

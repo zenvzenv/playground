@@ -1,4 +1,4 @@
-package zhengwei.jvm;
+package zhengwei.jvm.classloader;
 
 import com.sun.crypto.provider.AESKeyGenerator;
 import org.junit.jupiter.api.Test;
@@ -26,7 +26,7 @@ public class TestClassLoader3 {
          * C类由AppClassLoader加载器加载
          * 由反射加载类时，是对类的主动使用，所以会触发类的初始化过程
          */
-        Class<?> clazz2=Class.forName("zhengwei.jvm.C");
+        Class<?> clazz2=Class.forName("zhengwei.jvm.classloader.C");
         System.out.println(clazz2.getClassLoader());
     }
 
@@ -125,8 +125,8 @@ public class TestClassLoader3 {
         MyClassLoader loader1=new MyClassLoader("loader1");
         MyClassLoader loader2=new MyClassLoader("loader2");
 
-        Class<?> clazz1 = loader1.loadClass("zhengwei.jvm.MySample");
-        Class<?> clazz2 = loader2.loadClass("zhengwei.jvm.MySample");
+        Class<?> clazz1 = loader1.loadClass("zhengwei.jvm.classloader.MySample");
+        Class<?> clazz2 = loader2.loadClass("zhengwei.jvm.classloader.MySample");
         //输出true，系统类加载器加载了MySample，下次加载只会返回已经加载好的类对象
         System.out.println(clazz1==clazz2);
 
@@ -165,8 +165,8 @@ public class TestClassLoader3 {
         MyClassLoader loader2=new MyClassLoader("loader2");
         loader1.setPath("e:/temp/");
         loader2.setPath("e:/temp/");
-        Class<?> clazz1 = loader1.loadClass("zhengwei.jvm.MySample");
-        Class<?> clazz2 = loader2.loadClass("zhengwei.jvm.MySample");
+        Class<?> clazz1 = loader1.loadClass("zhengwei.jvm.classloader.MySample");
+        Class<?> clazz2 = loader2.loadClass("zhengwei.jvm.classloader.MySample");
         //输出false，系统类加载器加载了MySample，下次加载只会返回已经加载好的类对象
         System.out.println(clazz1==clazz2);
 
