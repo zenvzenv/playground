@@ -6,23 +6,84 @@
 * SysUtils-判断一个对象是否为空
 ### 2.jvm目录
 * TestGC-->学习JVM的时候测试GC的一些代码
-* TestClassLoader,TestClassLoader2-->学习JVM中类加载过程时测试的亿写实例代码，有代码的帮助，理解起来会更加的透彻
+* TestClassLoader,TestClassLoader2,TestClassLoader3,ThreadContextClassLoader,MyClassLoader-->学习JVM中类加载过程时测试时写的实例代码，有代码的帮助，理解起来会更加的透彻
     > 类的加载过程是:加载->链接->初始化->使用->卸载<br/>
     > 其中链接分为:验证->准备->解析<br/>
     __需要特别注意的是准备和初始化是两个过程__<br/>
     1. 加载：加载是把.class文件加载进JVM之中
+        1. 加载类的方式有从本地直接加载；通过网络下载.class文件；从jar中加载；从专有数据库中加载和将Java动态编译成.class文件
+        2. 类加载器
+            1. 类加载器是用来把类加载进JVM中的，从JDK1.2开始，类加载采用**双亲委托机制**，这种机制保证了JVM平台的安全性。在此委托机制中，除了JVM自带的根类加载器外，其余的类加载器都有且只有一个父类加载器。
+               Java中所有的核心类库都将会由JVM自带的Bootstrap ClassLoader、ExtClassLoader和AppClassLoader进行加载，用户自定义的类加载器是没有机会去加载的，防止包含恶意核心类乎代码被加载。
+            2. JVM自带的类加载器
+                1. 根类加载器(**Bootstrap ClassLoader**)，无父类，最顶级的类，会去系统属性 `sun.boot.class.path` 所指定的路径下加载类库，由C++实现，不是ClassLoader的子类
+                2. 扩展类加载器(**ExtClassLoader**),父加载器是**根类加载器**，负责加载Java平台中扩展功能的一些jar包，它从系统属性 `java.ext.dirs` 所指定的目录下加载类库，它是ClassLoader的子类
+                3. 系统类加载器(**AppClassLoader**)，父加载器是**扩展类加载器**，负责加载classpath中所指定的jar包，从系统属性 `java.class.path` 所指定的目录下加载类，它是ClassLoader的子类
+            3. 自定义类加载器
+                1. 需要继承 `java.lang.ClassLoader` , `java.lang.ClassLoader` 是一个抽象类，但是没有抽象方法，不能够直接实例化，需要继承它，然后实例化，需要重写findClass方法。
+                2. 用户自定义的类加载器的父类加载器是应用类加载器AppClassLoader
+                3. 还有一种特殊的类加载器，它的存在就是为了打破双亲委托机制的局限性，为了使用SPI机制而存在的，那就是线程上下文类加载器 `Thread.currentThread().getContextClassLoader()`
+            4. 类加载器并不会等到某个类被**首次主动使用**的时候再去加载它。JVM规范允许加载器在预料到某个类要被使用的时候就预先加载它，
+               如果在预先加载过程中遇到了.class文件缺失或存在错误，类加载器必须在**程序首次主动**使用该类时才报告错误(Linkage Error)，
+               如果这个类一直没有被**主动使用**，那么类加载器将不会报告此错误。
+            5. 获取ClassLoader的几种方式
+                1. 获取当前类加载器: `clazz.getClassLoader();`
+                2. 获取当前线程的上下文类加载器: `Thread.currentThread().getContextClassLoader();`
+                3. 获取系统的类加载器: `ClassLoader.getSystemClassLoader();`
+                4. 获得调用者的类加载器: `DirverManager.getCallerClassLoader();`
+            6. 值得注意的是：各个类加载器之间的关系并**不是继承关系**，而是**包含关系**，形成一种**树形结构**。除了根类加载器，其余的类加载器都有且只有一个父类加载器。
+            7. 类加载器的**命名空间**：
+                1. 每个类加载器都有自己的命名空间，**命名空间由该类加载器及其所有父类加载器加载的类组成**。
+                2. 在同一个命名空间中，不会出现类的全限定名相同的两个类。
+                3. 在不同的命名空间中，可能出现类的全限定名相同的两个类。[TestClassLoader3](zhengwei.jvm.TestClassLoader3.testClassLoaderNamespace)
+                4. **子类加载器的命名空间包含所有父类加载器的命名空间**。因此由子类加载器加载的类能够访问到父类加载器加载的类，但是父类加载器是访问不到子类加载器加载的类的，例如扩展类加载器能够访问到根类加载器加载的类。
+                5. 如果两个加载器之间没有直接或间接的关系，那么它们各自加载的类将互不可见。[TestClassLoader3](zhengwei.jvm.TestClassLoader3.testClassLoaderNamespace)
+            8. 创建自定义类加载器，只需要继承 `java.lang.ClassLoader` 类，然后重写 `findClass(String name)` 方法即可，该方法根据指定的类的二进制名字，返回对应的Class对象的引用。
     2. 链接：将类与类之间的关系处理好
-        1. 验证：校验.class文件的正确性
+        1. 验证：校验.class文件的正确性；语义检查；字节码验证和二进制兼容性验证，把加载的类的二进制文件合并到JVM中去。
         2. 准备：为类的**静态变量**分配内存空间，并将其**赋初始值**，在到达初始化之前，类的静态变量知识只是jvm赋予的默认值，而不是真正的用户指定的值
         3. 解析：将类中常量池中寻找类、接口、字段和方法的符号引用替换成直接引用的过程
     3. 初始化：为类的静态变量赋予正确的默认值，就是把链接阶段中的准备阶段的类的静态变量的默认值赋予用户指定的初始值
+        1. 类的初始化时机
+            1. 创建的类的实例
+            2. 访问某个类或接口的静态变量(字节码中使用`getstatic`标记)，或者对静态变量进行赋值(字节码中使用`putstatic`标记)，或者调用类的静态方法(字节码中使用`invokestatic`)
+            3. 反射Class.forName("zhengwei.jvm.Test");调用一个参数的Class.forName("xxxxx");是会默认初始化该类的，源码中是有体现的。
+                >`public static Class<?> forName(String className)
+                                 throws ClassNotFoundException {
+                         Class<?> caller = Reflection.getCallerClass();
+                         return forName0(className, true, ClassLoader.getClassLoader(caller), caller);
+                }`
+                >`private static native Class<?> forName0(String name, boolean initialize,
+                                                             ClassLoader loader,
+                                                             Class<?> caller)
+                throws ClassNotFoundException;`
+            4. 初始化一个类的子类，同时也会初始化这个类的父类，如果父类还有父类，那么会继续初始化父类的父类直到最顶级的父类。这条规则不适用于接口。
+            5. JVM启动时被表明启动类的类，包含main方法的类。
+            6. JDK1.7支持动态语言调用。
+            7. 除了上述的几种调用方式，**其余的调用都是被动调用**，都不会导致类的初始化。
+        2. 在初始化阶段，JVM会执行类的初始化语句，为类的静态变量赋予初始值(即**程序员自己指定的值**)，在程序中，静态变量的初始化方法有两种：
+            1. 在静态变量处声明初始值： `public static int a = 1;`
+            2. 在静态代码块进行初始化： `public static int a ; static { a = 1; }`
+        3. 静态变量的声明语句，以及静态代码块都被看作类的初始化语句，JVM会严格按照初始化语句在类文件的**既定顺序**去执行它们。
+        4. 类的初始化步骤
+            1. 加入这个类没有被加载和连接，那就先进行加载和连接。
+            2. 假如类存在直接父类，并且这个类还没有被初始化，那就初始化父类。
+            3. 假如类存在初始化语句，那就依次执行类的初始化语句。
+        5. **接口的初始化和类的初始化是有一些区别的**。
+            1. 在初始化一个接口的时候并不会初始化它的父接口。
+            2. 因此，一个父接口并不会因为它的父接口或者实现类被初始化而被初始化，只有当程序首次使用了该接口的特定接口的静态变量时才会导致该接口的初始化。
+        6. **调用ClassLoader的loadClass方法加载一个类时，并不是对类的主动使用，不会导致类的初始化。**
     4. 使用：
         1. 实例化对象：
             * 为类的新实例分配内存空间，通在堆上分配内存空间
             * 为实例赋予默认值
             * 为实例赋予指定的默认值
                 **注意：Java编译器为它编译的每个类都至少生成一个初始化方法。在Java的.class文件中这个实例化方法被称为<init>，针对源代码中的一个构造方法，Java编译器都会产生一个<init>方法**
-    5. 卸载：把类的相关信息从内存中剔除<br/>
+    5. 卸载：把类的相关信息从内存中剔除
+        1. 当一个类被加载、链接和初始化之后，它的生命周期就开始了。只有当该类不再被引用时，即不可触及时，class对象就结束了它的生命周期，该类的信息将会在方法区卸载，从而结束生命周期。
+        2. 一个类何时结束生命周期取决于代表它的class对象何时结束生命周期。
+        3. 由Java虚拟机自带的类加载器加载的类，在虚拟机周期中始终不会被卸载。Java自带的虚拟机：Bootstrap ClassLoader,ExtClassLoader和AppClassLoader。JVM会始终保持对这些类加载器的引用，而这些类加载器也会保持它们所加载类的class对象的引用，因此这些class对象始终是可触及的。
+        4. 由用户自定义的类加载器加载的类是可以被卸载的。
 **值得注意的是：类在准备和初始化阶段中，在执行为静态变量赋值遵循从上到下的顺序执行具体实例参见[TestClassLoader2.java](zhengwei.jvm.TestClassLoader2)**
 * 类和接口在加载的时候有一些不同，JVM在初始化一个类时，要求它的全部父类全部初始化完毕，但是这条规则不适用于接口
     1. 初始化一个类时，并不会初始化它所有实现的接口
