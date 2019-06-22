@@ -105,7 +105,7 @@ public class TestClassLoader3 {
         //获取应用类加载器(重要)
         System.out.println(ClassLoader.getSystemClassLoader());
         loader1.setPath("e:/temp/");
-        Class<?> clazz = loader1.loadClass("zhengwei.jvm.TestByteCode");
+        Class<?> clazz = loader1.loadClass("zhengwei.jvm.bytecode.TestByteCode");
         System.out.println("class : "+clazz.hashCode());
         System.out.println("class loader : "+clazz.getClassLoader());
 
