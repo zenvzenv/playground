@@ -1,4 +1,4 @@
-package zhengwei.jvm;
+package zhengwei.jvm.bytecode;
 
 /**
  * 探究字节码文件
