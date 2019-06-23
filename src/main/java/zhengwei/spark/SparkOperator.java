@@ -138,9 +138,12 @@ class SparkOperator implements Serializable {
             return record._1+"===="+record._2;
         });
         //foreach算子也是逐条执行的，不区分分区
-        map01.foreach(System.out::println);
-        //mapPartitions算子按分区执行，效率要比map算子要高，可以考虑把map算子替换成mapPartitions算子
-        //需要注意的是mapPartitions接受的函数的参数，iter是每个分区中的数据的迭代器，可以遍历这个迭代器获取到分区中的数据，最终返回的是一个iterator
+        map01.foreach(x-> System.out.println(x));
+        /*
+        mapPartitions算子按分区执行，效率要比map算子要高，可以考虑把map算子替换成mapPartitions算子
+        需要注意的是mapPartitions接受的函数的参数，iter是每个分区中的数据的迭代器，可以遍历这个迭代器获取到分区中的数据
+        最终返回的是一个iterator,这个迭代器包含所有分区处理之后的信息，迭代器中的每个元素对应于一个分区中的数据
+         */
         JavaRDD<String> map02 = rdd1.mapPartitions(iter -> {
             List<String> list = new ArrayList<>();
             iter.forEachRemaining(record -> {
@@ -150,6 +153,14 @@ class SparkOperator implements Serializable {
             return list.iterator();
         });
         //foreachPartitions算子是区分分区的，效率要比foreach要高
-        map02.foreachPartition(System.out::println);
+        map02.foreach(x-> System.out.println(x));
+        JavaRDD<String> map03 = rdd3.mapPartitions(iterator -> {
+            StringBuilder sb = new StringBuilder();
+            List<String> list = new ArrayList<>();
+            iterator.forEachRemaining(sb::append);
+            list.add(sb.toString());
+            return list.iterator();
+        });
+        map03.foreach(x-> System.out.println(x));
     }
 }
