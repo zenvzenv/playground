@@ -6,6 +6,12 @@ package zhengwei.jvm.bytecode;
  *      那么该线程也能够获取到方法B的锁，此时synchronized的计数器就变成了2.
  *  自旋锁：一个线程等待一个锁时，自己在那空转，即执行一段无意义的函数，执行完后再去获取锁，如果获取到了，那么就执行同步方法，
  *      如果没获取到那么再继续自旋。
+ *
+ * 一个类如果没有构造方法的话，那么编译器会为我们自动生成一个构造方法。
+ * 类的非静态成员变量的初始化赋值是在构造方法中完成赋值的。
+ * 如果我们自己定义了类的构造方法的话，那么类的非静态成员变量的赋值还是在构造方法中。
+ * 不论有几个构造方法，所有的构造方法内的类得非静态成员变量的初始化赋值都是一样的，
+ * 一个类中的静态成员变量和静态代码块在编译之后都会放置到一个<clinit>初始化方法中。
  * @author zhengwei AKA Sherlock
  * @since 2019/6/22 11:01
  */
@@ -13,12 +19,20 @@ public class TestByteCode2 {
 	String str = "welcome";
 	private int x = 5;
 	public static Integer integer = 10;
-	Object object = new Object();
+	private final Object object = new Object();
 
 	public static void main(String[] args) {
 		TestByteCode2 testByteCode2 = new TestByteCode2();
 		testByteCode2.setX(10);
 		integer=20;
+	}
+	//构造方法一
+	public TestByteCode2(){
+
+	}
+	//构造方法二
+	public TestByteCode2(int x){
+		this.x=x;
 	}
 
 	/**
