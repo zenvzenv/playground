@@ -20,13 +20,14 @@ import java.net.ServerSocket;
  *  2.在jdk1.4.2之前的版本中，并不是使用异常表的方式来对异常进行处理的，而是采用特定的指令方式
  *  3.当异常处理存在finally语句块时，现代化的JVM采取的处理方式是将finally语句块的字节码拼接到每一个catch语句块的后面
  *    换句话说，程序中存在多少个catch语句块，就会在每一个catch语句块后面重复多少个finally语句块后面。
- *
+ *  4.被catch住的异常和怕抛出的异常的地位是不同的，catch住的异常会在Code属性中的异常表中，在字节码上是有几个catch就会有几个finally语句块
+ *    被抛出的异常是在和Code同级的一个属性异常表中
  *
  * @author zhengwei AKA Sherlock
  * @since 2019/6/26 19:29
  */
 public class TestByteCode3 {
-	public void test(){
+	public void test() throws NullPointerException{
 		try {
 			InputStream is=new FileInputStream("aaa.txt");
 			ServerSocket ss=new ServerSocket(8888);
