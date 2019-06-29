@@ -110,6 +110,11 @@ public class MyClassLoader extends ClassLoader {
          * 2.当要加载的类在工程目录中时，我们自定义的类加载器会先去委托它的父类加载器去加载，父类加载器即系统类加载器能够加载的话就不会去调用我们重写的findClass方法
          * 3.如果要加载的类不在工程目录下时，我们自定义的类加载器也还是会先去委托父类加载器去加载，父加载器即系统类加载器发现要加载的类不在classpath下，
          *   那么加载类的任务会回到自定义的类加载器上，因为我们指定了类的绝对路径，那么自定义类是可以加载的，在loadCLass时也就会调用我们重写的findClass方法
+         *
+         * 类卸载的一些注意点：
+         *  被系统自带的类加载器加载的类是不会被卸载的，如被Bootstrap ClassLoader、ExtClassLoader和AppClassLoader加载的类是不会被卸载的
+         *  JVM会始终保持堆自带类加载器的引用，自带类加载器会保持对加载类的引用，所以这些被加载的类始终都是可触及的
+         *  自定义的类加载所加载的类是可以被卸载的。(删除classpath下的TestClassLoader的class文件)
          */
 //        loader.setPath("target/classes/zhengwei/jvm");
         loader1.setPath("E:/temp/");
