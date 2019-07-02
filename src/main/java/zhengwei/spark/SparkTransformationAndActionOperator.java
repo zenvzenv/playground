@@ -125,9 +125,7 @@ public class SparkTransformationAndActionOperator {
 	@Test
 	void testCollectAsMap(){
 		Map<String, Integer> collectAsMap = rdd6.mapValues(x -> x * 10).collectAsMap();
-		collectAsMap.forEach((k,v)->{
-			System.out.println(k+"->"+v);
-		});
+		collectAsMap.forEach((k,v)-> System.out.println(k+"->"+v));
 	}
 	@Test
 	void testFlatMapValues(){
@@ -138,6 +136,27 @@ public class SparkTransformationAndActionOperator {
 	void testFoldByKey(){
 		JavaPairRDD<String, Integer> foldByKey = rdd6.foldByKey(0, (x, y) -> Integer.valueOf(x + String.valueOf(y)));
 		foldByKey.foreach(x-> System.out.println(x._1+"->"+x._2));
+	}
+	@Test
+	void testCombineByKey(){
+		JavaPairRDD<String, Integer> combineByKey = rdd6.combineByKey(x -> x, Integer::sum, Integer::sum);
+		combineByKey.collectAsMap().forEach((x,y)-> System.out.println(x+"--"+y));
+		JavaPairRDD<String, List<Integer>> combineByKey1 = rdd6.combineByKey(
+				c -> {
+					List<Integer> list = new ArrayList<>();
+					list.add(c);
+					return list;
+				},
+				(c, v) -> {
+					c.add(v);
+					return c;
+				},
+				(c1, c2) -> {
+					c1.addAll(c2);
+					return c1;
+				}
+		);
+		combineByKey1.collectAsMap().forEach((k,v)-> System.out.println(k+"--"+v));
 	}
 	@AfterAll
 	static void end(){
