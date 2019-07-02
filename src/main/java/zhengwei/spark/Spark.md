@@ -165,6 +165,15 @@
             zhengwei2->[20, 25]
             ```
         10. reduceByKey([numTasks])算子：对K-V RDD进行key相同的进行汇聚，效率比 `groupByKey` 高，它会现在每个节点上先进行汇聚一次之后，再进行shuffle
+            reduceByKey的源代码
+            ```scala
+            def reduceByKey(partitioner: Partitioner, func: (V, V) => V): RDD[(K, V)] = self.withScope {
+                combineByKeyWithClassTag[V]((v: V) => v, func, func, partitioner)
+            }
+            ```
+            * createCombiner：与foldByKey相比，reduceByKey没有初始值，createCombiner也没有调用函数，而是直接将参数作为返回值返回了
+            * mergeValue，mergeCombiners：func函数同时是mergeValue和mergeCombiners
+            * 当不需要createCombiner，且mergeValue和mergeCombiners相同时适用
             ```java
             JavaPairRDD<String, Integer> reduceByKey = rdd6.reduceByKey(Integer::sum);
             ```
@@ -175,6 +184,22 @@
             zhengwei2->45
             ```
         11. aggregateByKey(zeroValue,func1,func2)算子：对K-V RDD进行key相同的汇聚，**初始值只会在分区中汇聚时(第一个lambda表达式)进行使用，在全局汇聚时(第二个lambda表达式)不使用**
+            aggregateByKey源码
+            ```scala
+            def aggregateByKey[U: ClassTag](zeroValue: U, partitioner: Partitioner)(seqOp: (U, V) => U,
+              combOp: (U, U) => U): RDD[(K, U)] = self.withScope {
+            // 中间代码省略，主要看最后一个，调用combineByKey
+            val cleanedSeqOp = self.context.clean(seqOp)
+            // seqOp，同时是，createCombiner，mergeValue。而combOp是mergeCombiners
+            combineByKeyWithClassTag[U]((v: V) => cleanedSeqOp(createZero(), v),
+              cleanedSeqOp, combOp, partitioner)
+            }
+            ```
+            * createCombiner：cleanedSeqOp(createZero(),v)是createCombiner，也就是传入的seqOpz，只不过其中一个值是传入的zeroValue
+            * mergeValue：seqOp函数同样是mergeValue，createCombine和mergeValue函数相同是aggregateByKey的关键
+            * mergeCombiners：combOp函数
+            * 当createCombiner和mergeValue函数的操作相同，aggregate更合适
+            实验：
             ```java
             JavaPairRDD<String, Integer> aggregateByKey = rdd6.aggregateByKey(2, Integer::sum, Integer::sum);
             ```
@@ -208,6 +233,48 @@
             maliu->map
             ```
         13. foldByKey()算子：
+        14. combineByKey(func,func,func)算子：按Key进行汇聚
+            combineByKey的源码
+            ```scala
+            def combineByKey[C](
+              createCombiner: V => C,
+              mergeValue: (C, V) => C,
+              mergeCombiners: (C, C) => C): RDD[(K, C)] = self.withScope {
+            combineByKeyWithClassTag(createCombiner, mergeValue, mergeCombiners)(null)
+            }
+            ```
+            * createCombiner：当combineByKey第一次遇到值为Key时，调用createCombiner函数，将V=>C
+            * mergeValue：combineByKey不是第一次遇到k为Key的值时，调用mergeValue函数，将V累加到C中(分区中局部汇聚)
+            * mergeCombine：将两个C合并起来(全局汇聚)
+            实验：
+            ```java
+            JavaPairRDD<String, Integer> combineByKey = rdd6.combineByKey(x -> x, Integer::sum, Integer::sum);
+            JavaPairRDD<String, List<Integer>> combineByKey1 = rdd6.combineByKey(
+            				c -> {
+            					List<Integer> list = new ArrayList<>();
+            					list.add(c);
+            					return list;
+            				}, 
+            				(c, v) -> {
+            					c.add(v);
+            					return c;
+            				}, 
+            				(c1, c2) -> {
+            					c1.addAll(c2);
+            					return c1;
+            				}
+            		);
+            ```
+            输出结果
+            ```text
+            zhengwei1--38
+            zhengwei3--52
+            zhengwei2--45
+            
+            zhengwei1--[18, 20]
+            zhengwei3--[22, 30]
+            zhengwei2--[20, 25]
+            ```
     2. 行动算子(Action)：触发转换(Transformation)算子的执行，决定了一个Application中有多少个Job，有几个Action就会有几个Job
         1. aggregate(zeroValue,func1,func2)算子：先分区内部聚合，再分区之间聚合，**初始值会在每次分区中局部汇聚时(第一个lambda表达式)使用一次，全局汇聚时(第二个lambda表达式)使用一次**，取决于分区的数量，应用的次数=partition size+1
             ```java
