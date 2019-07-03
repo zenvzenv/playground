@@ -15,7 +15,7 @@
 * Daily-LeetCode01TwoSum-[两数之和](https://leetcode-cn.com/problems/two-sum/)
 * Daily-LeetCode02AddTwoNumbers-[两数相加](https://leetcode-cn.com/problems/add-two-numbers/)
 ### 5.spark包
-* 详情参见[zhengwei.spark.Spark.md]
+* 详情参见[zhengwei.spark.Spark.md](https://github.com/zw030301/playground/blob/master/src/main/java/zhengwei/spark/Spark.md)
 
 ### 6.unsafe包
 * 闲暇时看一些Java关于unsafe的文章时写的一些代码
@@ -45,10 +45,10 @@
 * 观察者模式与责任链模式有些相像，都是利用面向对象的多态的这个特性；都是把每个观察者串联起来执行，但是责任链模式中可以中断链的继续执行，而观察者模式一般不中断链的执行。
 * 观察者模式有三个主要角色，1.被观察者，2.观察者，3.事件类，还有一些观察者中对于各种事件的处理逻辑的方法。
 ### 9.thread线程
-* 详情参见[zhengwei.thread.Thread.md]
+* 详情参见[zhengwei.thread.Thread.md](https://github.com/zw030301/playground/blob/master/src/main/java/zhengwei/thread/Thread.md)
 
 **平时学习和工作的一些总结**
 ---
-**zhengwei AKA Sherlock**
+**_zhengwei AKA Sherlock_**
 ---
 **闲暇之余会更新哦**
