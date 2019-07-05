@@ -5,7 +5,7 @@
 * IpUtil-IP格式的互转和IP地址的一些判断
 * SysUtils-判断一个对象是否为空
 ### 2.jvm目录
-* 详情参见[zhengwei.jvm.JVM.md]
+* 详情参见[zhengwei.jvm.JVM.md](https://github.com/zw030301/playground/blob/master/src/main/java/zhengwei/jvm/JVM.md)
 
 ### 3.hdfs包
 * HDFSClient-hdfs的客户端
