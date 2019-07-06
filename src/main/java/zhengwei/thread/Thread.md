@@ -14,3 +14,8 @@
     3. 通过 `Thread t = new Thread(Runnable)` 创建线程对象，会有默认的线程名，当线程启动的时候，JVM会去执行Runnable中复写run方法中的的代码
     4. 如果构造线程未传入ThreadGroup，那么Thread会获取父线程的ThreadGroup作为自己的ThreadGroup，父线程就是启动这个线程的线程，此时子线程和父线程在同一个ThreadGroup中，可以通过ThreadGroup的一些API做些操作
     5. 构造Thread的时候传入stackSize代表着该线程占用的stack的大小，如果没有指定，默认是0，0代表会忽略该参数，该参数会有JNI函数去调用。需要注意的是：该参数在有些平台有用有些平台没有用
+* chapter04
+    1. 守护线程可以理解为协作线程，协作它的父线程完成某项特定的作业，如果父线程结束了，那么守护线程也就结束了
+    2. 子线程会默认继承父线程的daemon
+    3. `getName()` 获取线程的名字，`getId()` 获取线程id，`getPriority()` 获取线程优先级，`join()` 当前线程等待子线程执行完毕之后，再执行父线程
+    4. 对于线程中断，Java只是把中断标志位设置为true，我们需要根据判断中断标志位来决定后续的操作
