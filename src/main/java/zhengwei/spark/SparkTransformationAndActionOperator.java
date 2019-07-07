@@ -158,6 +158,11 @@ public class SparkTransformationAndActionOperator {
 		);
 		combineByKey1.collectAsMap().forEach((k,v)-> System.out.println(k+"--"+v));
 	}
+	@Test
+	void testCache(){
+		JavaRDD<String> cache = rdd1.cache();
+		JavaRDD<String> unpersist = cache.unpersist();
+	}
 	@AfterAll
 	static void end(){
 		jsc.stop();
