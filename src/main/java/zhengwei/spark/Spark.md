@@ -8,11 +8,11 @@
             2. 位置感知
             3. 可伸缩
             4. 可缓存，提高效率
-            A list of partitions (一系列分区，分区有编号，有顺序)
-            A function for computing each split (每一个切片都会有一个函数作业在上面用于对数据进行处理)
-            A list of dependencies on other RDDs (RDD与RDD之间存在依赖关系，形成linkage血统)
-            Optionally, a Partitioner for key-value RDDs (e.g. to say that the RDD is hash-partitioned) (可选，key-value形式RDD才会有RDD[(K,V)])，如果是KV形式的RDD，会有一个分区器，默认是hash-partition)
-            Optionally, a list of preferred locations to compute each split on (e.g. block locations foran HDFS file) (可以师从hdfs中获取数据，会得到数据的最优位置(向Name Node请求元数据))
+            5. A list of partitions (一系列分区，分区有编号，有顺序)
+            6. A function for computing each split (每一个切片都会有一个函数作业在上面用于对数据进行处理)
+            7. A list of dependencies on other RDDs (RDD与RDD之间存在依赖关系，形成linkage血统)
+            8. Optionally, a Partitioner for key-value RDDs (e.g. to say that the RDD is hash-partitioned) (可选，key-value形式RDD才会有RDD[(K,V)])，如果是KV形式的RDD，会有一个分区器，默认是hash-partition)
+            9. Optionally, a list of preferred locations to compute each split on (e.g. block locations foran HDFS file) (可以师从hdfs中获取数据，会得到数据的最优位置(向Name Node请求元数据))
         3. RDD的弹性表现：
             1. 存储的弹性：内存与磁盘的自动切换
             2. 容错的弹性：数据丢失可以根据血统重新计算出来
@@ -275,6 +275,12 @@
             zhengwei3--[22, 30]
             zhengwei2--[20, 25]
             ```
+        15. cache()算子：缓存RDD算子，懒加载，不会生成 "新的" RDD，所生成的RDD只是对原RDD的引用，如果要**缓存的数据大于实际的内存的话，Spark只是会缓存一部分到内存，缓存一部分到磁盘中**
+            unpersist()算子，取消缓存
+            ```java 
+            JavaRDD<String> cache = rdd1.cache();
+            JavaRDD<String> unpersist = cache.unpersist();
+            ```
     2. 行动算子(Action)：触发转换(Transformation)算子的执行，决定了一个Application中有多少个Job，有几个Action就会有几个Job
         1. aggregate(zeroValue,func1,func2)算子：先分区内部聚合，再分区之间聚合，**初始值会在每次分区中局部汇聚时(第一个lambda表达式)使用一次，全局汇聚时(第二个lambda表达式)使用一次**，取决于分区的数量，应用的次数=partition size+1
             ```java
@@ -292,17 +298,54 @@
             ```
             输出结果
             ```text
-            19/06/30 13:51:11 INFO DAGScheduler: Job 0 finished: collectAsMap at SparkTransformationAndActionOperator.java:128, took 0.270322 s
             zhengwei1->200
             zhengwei3->300
             zhengwei2->250
             ```
         3. countByKey()算子：对key出现的次数进行统计
         4. countByValue()算子：对value出现的次数进行统计
-        5. foreach(func)
+        5. foreach(func)算子：每次仅取出一条数据进行处理
         6. foreachPartition(func)算子：每次取出一整个partition中的数据，比foreach要高效，saveAsTextFile底层调用的就是foreachPartition，所以是有几个分区就会有几个文件
-* 一个partition对应一个task，一个task对应一个输出文件
+* 一个partition对应一个task(在同一个Stage中)，一个partition对应的task只能在一台机器里面(Executor)，一台机器上可以有多个分区，即对应多个task，一个task对应一个输出文件
 * Executor中包含Task
 * Driver默认只收集1G的数据，超过1G就不再收集了
 * 最好不要将结果通过collect收集到Driver端，可以直接在算子中直接写入到需要的存储系统中(redis,hbase,mysql...)，这样可以提高效率，不会对Driver造成冲击
-* saveAsTestFile底层
+* Spark是边读边计算，
+* Spark的WordCount的执行流程
+    1. 会生成6个RDD，特别注意的是textFile会生成两个RDD->(HadoopRDD,MapPartitionsRDD)，saveAsTextFile会生成一个RDD->(MapPartitionsRDD)
+    2. 刚开始textFile读文件进来的时候是会有`HadoopRDD<偏移量,一行数据>`，然后回调用map将偏移量给去掉即`MapPartitionsRDD<一行文本>`，只保留下一行的文本数据
+    具体源码为
+    ```scala
+    hadoopFile(path, classOf[TextInputFormat], classOf[LongWritable], classOf[Text],
+          minPartitions).map(pair => pair._2.toString).setName(path)
+    ```
+    3. saveAsTextFile会生成一个 `MapPartitions<String>` 用来存储文件到hdfs
+    ```scala
+    def saveAsTextFile(path: String): Unit = withScope {
+        // https://issues.apache.org/jira/browse/SPARK-2075
+        //
+        // NullWritable is a `Comparable` in Hadoop 1.+, so the compiler cannot find an implicit
+        // Ordering for it and will use the default `null`. However, it's a `Comparable[NullWritable]`
+        // in Hadoop 2.+, so the compiler will call the implicit `Ordering.ordered` method to create an
+        // Ordering for `NullWritable`. That's why the compiler will generate different anonymous
+        // classes for `saveAsTextFile` in Hadoop 1.+ and Hadoop 2.+.
+        //
+        // Therefore, here we provide an explicit Ordering `null` to make sure the compiler generate
+        // same bytecodes for `saveAsTextFile`.
+        val nullWritableClassTag = implicitly[ClassTag[NullWritable]]
+        val textClassTag = implicitly[ClassTag[Text]]
+        //因为保存到hdfs需要KV形式的RDD，把K设置成null，然后把value.toString()输出到文件中
+        val r = this.mapPartitions { iter =>
+          val text = new Text()
+          iter.map { x =>
+            text.set(x.toString)
+            (NullWritable.get(), text)
+          }
+        }
+        RDD.rddToPairRDDFunctions(r)(nullWritableClassTag, textClassTag, null)
+          .saveAsHadoopFile[TextOutputFormat[NullWritable, Text]](path)
+      }
+    ```
+    3. Spark会根据shuffle来划分Stage，同一个Stage中的Task的类型是相同的，MapTask或者是ResultTask
+    4. 一共有多少个Task由Stage和Partition共同决定，读取hdfs中文件时，有多少个文件切片就会有多少个Partition，即就会有多少个Task，即这个Stage中一共有Task，如果后续的Stage中没有自己指定分区数的话，那么后续的Stage的分区将和之前的Stage中的分区保持一致，那一共有多少个`Task=Stage*Task`.
+    5. Shuffle分为两个步骤，分别是MapTask和ResultTask，MapTask会把根据分区器的规则把结果溢写到磁盘中然后把最后的结果反馈给Driver，ResultTask会去和Driver通信，获取到MapTask溢写的文件的位置，然后去拉取再做聚合
