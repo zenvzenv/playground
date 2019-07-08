@@ -275,11 +275,59 @@
             zhengwei3--[22, 30]
             zhengwei2--[20, 25]
             ```
-        15. cache()算子：缓存RDD算子，懒加载，不会生成 "新的" RDD，所生成的RDD只是对原RDD的引用，如果要**缓存的数据大于实际的内存的话，Spark只是会缓存一部分到内存，缓存一部分到磁盘中**
+        15. cache()算子：缓存RDD算子，懒加载，不会生成 "新的" RDD，所生成的RDD只是对原RDD的引用，如果要**缓存的数据大于实际的内存的话，Spark只是会缓存一部分到内存，缓存一部分到磁盘中，cache是不会切断RDD的血统关系的**
             unpersist()算子，取消缓存
             ```java 
             JavaRDD<String> cache = rdd1.cache();
             JavaRDD<String> unpersist = cache.unpersist();
+            ```
+            cache实际调用的是 `persist()` 方法，`persist()` 方法默认的缓存级别是全存在内存中，不经如此， `persist()` 还提供不通的存储等级来满足需求，具体的存储等级如下：
+            ```scala
+            //第一个参数：是否缓存到磁盘
+            //第二个参数：是否缓存到内存
+            //第三个参数：缓存到磁盘中，是否要进行序列化，true->不进行序列化，按Java对象缓存，false->进行序列化，一序列化之后的对象缓存
+            //第四个参数：缓存到内存中，是否要进行序列化，true->不进行序列化，按Java对象缓存，false->进行序列化，一序列化之后的对象缓存
+            //第五个参数，要缓存的数据的副本数
+            val NONE = new StorageLevel(false, false, false, false)
+            /*
+            虽然 `persist(DISK_ONLY)` 会将RDD中的partition持久化到磁盘中，
+            但是partition是由blockManager管理的，一旦在Driver Program执行结束之后，
+            即Executor所在的进程CoarseGrainedExecutorBackend被stop，被持久化到磁盘的数据也会被删除(整个blockManager使用的local文件被删除)
+            */
+            val DISK_ONLY = new StorageLevel(true, false, false, false)
+            val DISK_ONLY_2 = new StorageLevel(true, false, false, false, 2)
+            val MEMORY_ONLY = new StorageLevel(false, true, false, true)
+            val MEMORY_ONLY_2 = new StorageLevel(false, true, false, true, 2)
+            val MEMORY_ONLY_SER = new StorageLevel(false, true, false, false)
+            val MEMORY_ONLY_SER_2 = new StorageLevel(false, true, false, false, 2)
+            val MEMORY_AND_DISK = new StorageLevel(true, true, false, true)
+            val MEMORY_AND_DISK_2 = new StorageLevel(true, true, false, true, 2)
+            val MEMORY_AND_DISK_SER = new StorageLevel(true, true, false, false)
+            val MEMORY_AND_DISK_SER_2 = new StorageLevel(true, true, false, false, 2)
+            val OFF_HEAP = new StorageLevel(true, true, true, false, 1)
+            ```
+            **cache缓存的数据是存放在Executor所在的机器上的内存或者磁盘的，若缓存在内存中的话，内存中是数据的地址引用**
+        16. checkpoint()算子：将需要花费很大代价的RDD缓存到可靠的文件系统中，在使用checkpoint之前，需要设置checkpoint的目录，即 `JavaSparkContext jsc.setChackPoint("hdfs://ns:9000/checkpoint")` ，设置完了之后，下次进行checkpoint的时候，spark会把缓存下来的文件存入到对应的hdfs目录中。<br/>
+            **特别注意的是：checkpoint会切断RDD的血统关系，因为hdfs的高容错性，保证了缓存的副本是可靠的，可以丢弃掉之前的依赖关系；被checkpoint到hdfs的缓存文件是持久化到磁盘的，即使整个Driver Program执行结束了之后，缓存的数据也不会消失；checkpoint会等到job结束之后，会单独再启动一个job去完成checkpoint，即需要被checkpoint的RDD会被计算两次**<br>
+            **Spark官方建议把需要checkpoint的RDD先缓存到内存中，再进行checkpoint，这样就不会把RDD计算两次了**
+            ```scala
+            /**
+             * Mark this RDD for checkpointing. It will be saved to a file inside the checkpoint
+             * directory set with `SparkContext#setCheckpointDir` and all references to its parent
+             * RDDs will be removed. This function must be called before any job has been
+             * executed on this RDD. It is strongly recommended that this RDD is persisted in
+             * memory, otherwise saving it on a file will require recomputation.
+             */
+            def checkpoint(): Unit = RDDCheckpointData.synchronized {
+              // NOTE: we use a global lock here due to complexities downstream with ensuring
+              // children RDD partitions point to the correct parent partitions. In the future
+              // we should revisit this consideration.
+              if (context.checkpointDir.isEmpty) {
+                throw new SparkException("Checkpoint directory has not been set in the SparkContext")
+              } else if (checkpointData.isEmpty) {
+                checkpointData = Some(new ReliableRDDCheckpointData(this))
+              }
+            }
             ```
     2. 行动算子(Action)：触发转换(Transformation)算子的执行，决定了一个Application中有多少个Job，有几个Action就会有几个Job
         1. aggregate(zeroValue,func1,func2)算子：先分区内部聚合，再分区之间聚合，**初始值会在每次分区中局部汇聚时(第一个lambda表达式)使用一次，全局汇聚时(第二个lambda表达式)使用一次**，取决于分区的数量，应用的次数=partition size+1
