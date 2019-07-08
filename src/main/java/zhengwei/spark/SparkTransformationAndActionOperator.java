@@ -160,8 +160,14 @@ public class SparkTransformationAndActionOperator {
 	}
 	@Test
 	void testCache(){
+		//把RDD缓存到内存中，以分区为单位进行缓存
 		JavaRDD<String> cache = rdd1.cache();
+		//把缓存的数据抹去，即取消缓存数据
 		JavaRDD<String> unpersist = cache.unpersist();
+		//设置checkpoint的缓存目录(需要分布式文件系统，高可靠性)，以后缓存的数据将会存放在该hdfs的目录上
+		jsc.setCheckpointDir("hdfs://ns:9000/checkpoint");
+		//设置检查点checkpoint
+		cache.checkpoint();
 	}
 	@AfterAll
 	static void end(){
