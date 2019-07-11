@@ -17,6 +17,94 @@
                 1. 需要继承 `java.lang.ClassLoader` , `java.lang.ClassLoader` 是一个抽象类，但是没有抽象方法，不能够直接实例化，需要继承它，然后实例化，需要重写findClass方法。
                 2. 用户自定义的类加载器的父类加载器是应用类加载器AppClassLoader
                 3. 还有一种特殊的类加载器，它的存在就是为了打破双亲委托机制的局限性，为了使用SPI机制而存在的，那就是线程上下文类加载器 `Thread.currentThread().getContextClassLoader()`
+                    1. 特别注意的是：自从JDK1.6开始我们使用诸如jdbc、xml...等接口的实现时，即具体实现由厂商来实现的功能时，其实不需要再去显示的去调用 `Class.forName("xxx.class")`
+                    2. 因为有 `java.util.ServiceLoader` 类的存在
+                        1. 一个重要的属性 `private static final String PREFIX = "META-INF/services/";` ，ServiceLoader会加载去classpath下jar包中的META-INF/services/文件中所表明要加载的类的二进制名字，
+                           但是ServiceLoader这个类是由BootstrapClassLoader去加载的，但是BootstrapClassLoader加载不了我们指定的厂商实现的jar包，那么这时候就要用到线程上下文类加载器( `Thread.currentThread().getContextClassLoader()` )
+                           代码如下面的load方法
+                        2. 一个重要的方法 `public static <S> ServiceLoader<S> load(Class<S> service)`，具体代码如下
+                        ```java
+                        public static <S> ServiceLoader<S> load(Class<S> service) {
+	                            //获取线程上下文类加载器
+                                ClassLoader cl = Thread.currentThread().getContextClassLoader();
+                                return ServiceLoader.load(service, cl);
+                        }
+                        public static <S> ServiceLoader<S> load(Class<S> service, ClassLoader loader) {
+                             return new ServiceLoader<>(service, loader);
+                        }
+                        private ServiceLoader(Class<S> svc, ClassLoader cl) {
+                             service = Objects.requireNonNull(svc, "Service interface cannot be null");
+                             //如果线程上下文类加载器为空则使用应用类加载器作为加载器去加载类
+                             loader = (cl == null) ? ClassLoader.getSystemClassLoader() : cl;
+                             acc = (System.getSecurityManager() != null) ? AccessController.getContext() : null;
+                             reload();
+                       }
+                       ```
+                       `java.sql.DriverManager` loadInitialDrivers会去调用ServiceLoader.load方法去加载jdbc相关的驱动类
+                       ```java
+                        private static void loadInitialDrivers() {
+                                String drivers;
+                                try {
+                                    drivers = AccessController.doPrivileged(new PrivilegedAction<String>() {
+                                        public String run() {
+                                            return System.getProperty("jdbc.drivers");
+                                        }
+                                    });
+                                } catch (Exception ex) {
+                                    drivers = null;
+                                }
+                                // If the driver is packaged as a Service Provider, load it.
+                                // Get all the drivers through the classloader
+                                // exposed as a java.sql.Driver.class service.
+                                // ServiceLoader.load() replaces the sun.misc.Providers()
+                        
+                                AccessController.doPrivileged(new PrivilegedAction<Void>() {
+                                    public Void run() {
+                                    	//去加载jdbc的驱动类
+                                        ServiceLoader<Driver> loadedDrivers = ServiceLoader.load(Driver.class);
+                                        Iterator<Driver> driversIterator = loadedDrivers.iterator();
+                        
+                                        /* Load these drivers, so that they can be instantiated.
+                                         * It may be the case that the driver class may not be there
+                                         * i.e. there may be a packaged driver with the service class
+                                         * as implementation of java.sql.Driver but the actual class
+                                         * may be missing. In that case a java.util.ServiceConfigurationError
+                                         * will be thrown at runtime by the VM trying to locate
+                                         * and load the service.
+                                         *
+                                         * Adding a try catch block to catch those runtime errors
+                                         * if driver not available in classpath but it's
+                                         * packaged as service and that service is there in classpath.
+                                         */
+                                        try{
+                                            while(driversIterator.hasNext()) {
+                                                driversIterator.next();
+                                            }
+                                        } catch(Throwable t) {
+                                        // Do nothing
+                                        }
+                                        return null;
+                                    }
+                                });
+                        
+                                println("DriverManager.initialize: jdbc.drivers = " + drivers);
+                        
+                                if (drivers == null || drivers.equals("")) {
+                                    return;
+                                }
+                                String[] driversList = drivers.split(":");
+                                println("number of Drivers:" + driversList.length);
+                                for (String aDriver : driversList) {
+                                    try {
+                                        println("DriverManager.Initialize: loading " + aDriver);
+                                        Class.forName(aDriver, true,
+                                                ClassLoader.getSystemClassLoader());
+                                    } catch (Exception ex) {
+                                        println("DriverManager.Initialize: load failed: " + ex);
+                                    }
+                                }
+                            }
+                        ```
             4. 类加载器并不会等到某个类被**首次主动使用**的时候再去加载它。JVM规范允许加载器在预料到某个类要被使用的时候就预先加载它，
                如果在预先加载过程中遇到了.class文件缺失或存在错误，类加载器必须在**程序首次主动**使用该类时才报告错误(Linkage Error)，
                如果这个类一直没有被**主动使用**，那么类加载器将不会报告此错误。
