@@ -44,11 +44,12 @@ public class ThreadService {
 				executorThread.interrupt();
 				break;
 			}
-			/*try {
+			try {
 				executorThread.sleep(1);
 			} catch (InterruptedException e) {
+				System.out.println("执行线程被打断");
 				e.printStackTrace();
-			}*/
+			}
 		}
 	}
 
