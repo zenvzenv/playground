@@ -19,3 +19,54 @@
     2. 子线程会默认继承父线程的daemon
     3. `getName()` 获取线程的名字，`getId()` 获取线程id，`getPriority()` 获取线程优先级，`join()` 当前线程等待子线程执行完毕之后，再执行父线程
     4. 对于线程中断，Java只是把中断标志位设置为true，我们需要根据判断中断标志位来决定后续的操作
+    5. 优雅的关闭线程，利用一个标志位来判定是否要结束线程
+        1. 可以设置标志位，比如一个flag，循环体中来判断flag，如果是true则继续下次循环，如果为false则结束
+            ```java
+            @Override
+            private volatile boolean start = true;
+            public void run() {
+                while (start) {
+                    //do something
+                }
+            }
+            ```
+        2. 可以通过判断线程中的中断标志位，通过 `java.lang.Thread.interrupted` 方法来获取中断标志位
+            ```java
+            @Override
+            public void run() {
+                //判断中断标志位，如果是中断状态的话就退出
+                while (!Thread.interrupted()) {
+                    try {
+                        Thread.sleep(1_000L);
+                    } catch (InterruptedException e) {
+                        break;//return
+                    }
+                    //-------后续操作--------
+                }
+            }
+            ```
+    6. 强制关闭线程，利用守护线程的特性来结束线程
+        1. 将要执行真正业务逻辑的线程realTask包装到一个父线程中executorThread。把realTask设置成executorThread的守护线程，那么executorThread结束的话，那么作为executorThread的守护线程的realTask也会结束
+            ```java
+            public void execute(Runnable task) {
+	            //包装真正执行业务逻辑的线程的线程
+                executorThread = new Thread(() -> {
+                    //真正要执行业务逻辑的线程
+                    Thread realTask = new Thread(task);
+                    realTask.setDaemon(true);
+                    realTask.start();
+                    try {
+                        //让executorThread等待realTask执行完毕
+                        realTask.join();
+                        finished = true;
+                    } catch (InterruptedException e) {
+                        //捕获到打断信号
+                        System.out.println("executorThread被打断，执行线程结束生命周期");
+        				e.printStackTrace();
+                    }
+                });
+                executorThread.start();
+            }
+            ```
+* chapter05
+    1. 
