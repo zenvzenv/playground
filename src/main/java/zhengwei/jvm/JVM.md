@@ -86,6 +86,261 @@
             1. 初始化一个类时，并不会初始化它所有实现的接口
             2. 在初始化一个接口时，并不会先去初始化它的父接口<br/>
             因此，一个父接口并不会因为它的子接口或实现类初始化而初始化，只有当程序首次使用了特定接口的静态变量时，才会去初始化该接口。
+    6. Launcher类，Java程序的入口
+        1. 线程上下文类加载的默认值是应用类加载器AppClassLoader，源码中的体现 `sun.misc.Launcher` ,Launcher是由Bootstrap ClassLoader加载，ExtClassLoader和AppClassLoader都会在Launcher中进行初始化
+        ```java
+        private static URLStreamHandlerFactory factory = new Launcher.Factory();
+        private static Launcher launcher = new Launcher();
+        private static String bootClassPath = System.getProperty("sun.boot.class.path");
+        private ClassLoader loader;
+        public Launcher() {
+                Launcher.ExtClassLoader var1;
+                try {
+         	        //初始化ExtClassLoader
+                    var1 = Launcher.ExtClassLoader.getExtClassLoader();
+                } catch (IOException var10) {
+                    throw new InternalError("Could not create extension class loader", var10);
+                }
+                try {
+                    //初始化AppClassLoader，设置AppClassLOader的父类加载器为扩展类加载器ExtClassLoader
+                    this.loader = Launcher.AppClassLoader.getAppClassLoader(var1);
+                } catch (IOException var9) {
+                    throw new InternalError("Could not create application class loader", var9);
+                }
+                //设置线程上下文类加载器为AppClassLoader
+                Thread.currentThread().setContextClassLoader(this.loader);
+                String var2 = System.getProperty("java.security.manager");
+                if (var2 != null) {
+                    SecurityManager var3 = null;
+                    if (!"".equals(var2) && !"default".equals(var2)) {
+                        try {
+                            var3 = (SecurityManager)this.loader.loadClass(var2).newInstance();
+                        } catch (IllegalAccessException var5) {
+                        } catch (InstantiationException var6) {
+                        } catch (ClassNotFoundException var7) {
+                        } catch (ClassCastException var8) {
+                        }
+                    } else {
+                        var3 = new SecurityManager();
+                    }
+        
+                    if (var3 == null) {
+                        throw new InternalError("Could not create SecurityManager: " + var2);
+                    }
+        
+                    System.setSecurityManager(var3);
+                }
+        
+       }
+        ```
+        ExtClassLoader类是Launcher类中的静态内部类
+        ```java
+        static class ExtClassLoader extends URLClassLoader {
+                private static volatile Launcher.ExtClassLoader instance;
+        
+                public static Launcher.ExtClassLoader getExtClassLoader() throws IOException {
+         	        //单例模式
+                    if (instance == null) {
+                        Class var0 = Launcher.ExtClassLoader.class;
+                        synchronized(Launcher.ExtClassLoader.class) {
+                            if (instance == null) {
+                                instance = createExtClassLoader();
+                            }
+                        }
+                    }
+        
+                    return instance;
+                }
+                //初始化ExtClassLoader
+                private static Launcher.ExtClassLoader createExtClassLoader() throws IOException {
+                    try {
+                        return (Launcher.ExtClassLoader)AccessController.doPrivileged(new PrivilegedExceptionAction<Launcher.ExtClassLoader>() {
+                            public Launcher.ExtClassLoader run() throws IOException {
+                     	        //获取java.ext.dir系统属性所指定的目录下的文件即jar包
+                                File[] var1 = Launcher.ExtClassLoader.getExtDirs();
+                                int var2 = var1.length;
+        
+                                for(int var3 = 0; var3 < var2; ++var3) {
+                                    MetaIndex.registerDirectory(var1[var3]);
+                                }
+                                //调用构造方法，加载目录下的jar包
+                                return new Launcher.ExtClassLoader(var1);
+                            }
+                        });
+                    } catch (PrivilegedActionException var1) {
+                        throw (IOException)var1.getException();
+                    }
+                }
+        
+                void addExtURL(URL var1) {
+                    super.addURL(var1);
+                }
+                //构造方法，传入要加载的jar的文件数组
+                public ExtClassLoader(File[] var1) throws IOException {
+                    super(getExtURLs(var1), (ClassLoader)null, Launcher.factory);
+                    SharedSecrets.getJavaNetAccess().getURLClassPath(this).initLookupCache(this);
+                }
+        
+                private static File[] getExtDirs() {
+                    String var0 = System.getProperty("java.ext.dirs");
+                    File[] var1;
+                    if (var0 != null) {
+                        StringTokenizer var2 = new StringTokenizer(var0, File.pathSeparator);
+                        int var3 = var2.countTokens();
+                        var1 = new File[var3];
+        
+                        for(int var4 = 0; var4 < var3; ++var4) {
+                            var1[var4] = new File(var2.nextToken());
+                        }
+                    } else {
+                        var1 = new File[0];
+                    }
+        
+                    return var1;
+                }
+                //获取
+                private static URL[] getExtURLs(File[] var0) throws IOException {
+                    Vector var1 = new Vector();
+        
+                    for(int var2 = 0; var2 < var0.length; ++var2) {
+                        String[] var3 = var0[var2].list();
+                        if (var3 != null) {
+                            for(int var4 = 0; var4 < var3.length; ++var4) {
+                                if (!var3[var4].equals("meta-index")) {
+                                    File var5 = new File(var0[var2], var3[var4]);
+                                    var1.add(Launcher.getFileURL(var5));
+                                }
+                            }
+                        }
+                    }
+        
+                    URL[] var6 = new URL[var1.size()];
+                    var1.copyInto(var6);
+                    return var6;
+                }
+        
+                public String findLibrary(String var1) {
+                    var1 = System.mapLibraryName(var1);
+                    URL[] var2 = super.getURLs();
+                    File var3 = null;
+        
+                    for(int var4 = 0; var4 < var2.length; ++var4) {
+                        URI var5;
+                        try {
+                            var5 = var2[var4].toURI();
+                        } catch (URISyntaxException var9) {
+                            continue;
+                        }
+        
+                        File var6 = Paths.get(var5).toFile().getParentFile();
+                        if (var6 != null && !var6.equals(var3)) {
+                            String var7 = VM.getSavedProperty("os.arch");
+                            File var8;
+                            if (var7 != null) {
+                                var8 = new File(new File(var6, var7), var1);
+                                if (var8.exists()) {
+                                    return var8.getAbsolutePath();
+                                }
+                            }
+        
+                            var8 = new File(var6, var1);
+                            if (var8.exists()) {
+                                return var8.getAbsolutePath();
+                            }
+                        }
+        
+                        var3 = var6;
+                    }
+        
+                    return null;
+                }
+        
+                private static AccessControlContext getContext(File[] var0) throws IOException {
+                    PathPermissions var1 = new PathPermissions(var0);
+                    ProtectionDomain var2 = new ProtectionDomain(new CodeSource(var1.getCodeBase(), (Certificate[])null), var1);
+                    AccessControlContext var3 = new AccessControlContext(new ProtectionDomain[]{var2});
+                    return var3;
+                }
+        
+                static {
+                    ClassLoader.registerAsParallelCapable();
+                    instance = null;
+                }
+            }
+        ```
+        AppClassLoader类是Launcher类中的静态内部类
+        ```java
+        static class AppClassLoader extends URLClassLoader {
+                final URLClassPath ucp = SharedSecrets.getJavaNetAccess().getURLClassPath(this);
+        
+                public static ClassLoader getAppClassLoader(final ClassLoader var0) throws IOException {
+                    final String var1 = System.getProperty("java.class.path");
+                    //获得指定目录下的文件
+                    final File[] var2 = var1 == null ? new File[0] : Launcher.getClassPath(var1);
+                    return (ClassLoader)AccessController.doPrivileged(new PrivilegedAction<Launcher.AppClassLoader>() {
+                        public Launcher.AppClassLoader run() {
+                 	        //要加载的jar包的文件路径
+                            URL[] var1x = var1 == null ? new URL[0] : Launcher.pathToURLs(var2);
+                            //构造方法，传入系统属性java.class.path指定的目录下的jar包，和父类加载器(即ExtClassLoader)
+                            return new Launcher.AppClassLoader(var1x, var0);
+                        }
+                    });
+                }
+                //构造方法，传入要加载的jar包的路径和父加载器ExtClassLoader
+                AppClassLoader(URL[] var1, ClassLoader var2) {
+                    super(var1, var2, Launcher.factory);
+                    this.ucp.initLookupCache(this);
+                }
+                //加载类方法
+                public Class<?> loadClass(String var1, boolean var2) throws ClassNotFoundException {
+                    int var3 = var1.lastIndexOf(46);
+                    if (var3 != -1) {
+                        SecurityManager var4 = System.getSecurityManager();
+                        if (var4 != null) {
+                            var4.checkPackageAccess(var1.substring(0, var3));
+                        }
+                    }
+        
+                    if (this.ucp.knownToNotExist(var1)) {
+                        Class var5 = this.findLoadedClass(var1);
+                        if (var5 != null) {
+                            if (var2) {
+                                this.resolveClass(var5);
+                            }
+        
+                            return var5;
+                        } else {
+                            throw new ClassNotFoundException(var1);
+                        }
+                    } else {
+                        return super.loadClass(var1, var2);
+                    }
+                }
+        
+                protected PermissionCollection getPermissions(CodeSource var1) {
+                    PermissionCollection var2 = super.getPermissions(var1);
+                    var2.add(new RuntimePermission("exitVM"));
+                    return var2;
+                }
+        
+                private void appendToClassPathForInstrumentation(String var1) {
+                    assert Thread.holdsLock(this);
+        
+                    super.addURL(Launcher.getFileURL(new File(var1)));
+                }
+        
+                private static AccessControlContext getContext(File[] var0) throws MalformedURLException {
+                    PathPermissions var1 = new PathPermissions(var0);
+                    ProtectionDomain var2 = new ProtectionDomain(new CodeSource(var1.getCodeBase(), (Certificate[])null), var1);
+                    AccessControlContext var3 = new AccessControlContext(new ProtectionDomain[]{var2});
+                    return var3;
+                }
+        
+                static {
+                    ClassLoader.registerAsParallelCapable();
+                }
+            }
+        ```
 * zhengwei.jvm.bytecode->学习Java字节码时敲的一些实例代码
     1. 可以使用 `javap -verbose -p` 命令来分析一个class文件，将会分析文件中的魔数、版本号、常量池、类信息、类构造方法和成员变量。
     2. 魔数：所有的.class文件前四个字节为魔数，魔数的固定值是 `0xCAFEBABE`
