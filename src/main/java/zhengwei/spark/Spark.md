@@ -397,3 +397,12 @@
     3. Spark会根据shuffle来划分Stage，同一个Stage中的Task的类型是相同的，MapTask或者是ResultTask
     4. 一共有多少个Task由Stage和Partition共同决定，读取hdfs中文件时，有多少个文件切片就会有多少个Partition，即就会有多少个Task，即这个Stage中一共有Task，如果后续的Stage中没有自己指定分区数的话，那么后续的Stage的分区将和之前的Stage中的分区保持一致，那一共有多少个`Task=Stage*Task`.
     5. Shuffle分为两个步骤，分别是MapTask和ResultTask，MapTask会把根据分区器的规则把结果溢写到磁盘中然后把最后的结果反馈给Driver，ResultTask会去和Driver通信，获取到MapTask溢写的文件的位置，然后去拉取再做聚合
+* 广播变量和累加器
+    1. 广播变量
+        1. **不能将一个RDD广播出去**，因为RDD中是不存储数据的，只存储计算逻辑，不过可以把RDD的极计算结果广播出去
+        2. 广播变量只能在Driver进行定义，**不能再Executor端进行定义**
+        3. 在Driver端可以修改广播变量的值，但是在Executor中不能修改广播变量的值
+        4. 如果Executor端用到了Driver端的变量，如果没有使用广播变量的话那么有多少个Task就会有多少个变量的副本；如果使用了广播变量的话，那么不论有多少个Task，变量的副本始终是一份
+        5. **广播变量是存储在Executor中的MemoryStore中的**
+    2. 累加器  
+        
