@@ -69,4 +69,8 @@
             }
             ```
 * chapter05
-    1. 
+    1. synchronized关键字
+        1. 修饰在方法上的话那么锁定的是 `this` 对象，在字节码上是体现不出monitorenter和monitorexit的
+        2. 修饰在方法内部的话，我们可以指定任意对象作为synchronized锁定对象，在字节码上是能够体现出monitorenter和monitorexit的
+        3. 一个monitorenter可以对应多个monitorexit，因为程序不一定是正常退出，也有可能发生异常而退出
+        4. 在synchronized代码块内部，其实是单线程执行的，而在synchronized外部是多线程并发执行的，所以要控制synchronized代码的范围，以确保效率不会太低
