@@ -74,3 +74,10 @@
         2. 修饰在方法内部的话，我们可以指定任意对象作为synchronized锁定对象，在字节码上是能够体现出monitorenter和monitorexit的
         3. 一个monitorenter可以对应多个monitorexit，因为程序不一定是正常退出，也有可能发生异常而退出
         4. 在synchronized代码块内部，其实是单线程执行的，而在synchronized外部是多线程并发执行的，所以要控制synchronized代码的范围，以确保效率不会太低
+    2. sleep和wait的区别
+        1. sleep是Thread提供的方法，wait是Object提供的方法
+        2. sleep不会释放锁，wait会释放锁，并且把线程加入到Wait Set中
+        3. 使用sleep方法不需要在synchronized代码块中，但是wait需要
+        4. 使用sleep时，不需要被唤醒，但是wait是需要被唤醒的
+    3. 死锁：可以通过 `jstack <pid>` 查看是否有死锁，代码中synchronized的重叠使用，很可能会发生死锁
+    4. 生产者和消费者实例，需要注意的是多个生产者和多个消费者的时候对于notify和notifyAll的把控，具体见代码
