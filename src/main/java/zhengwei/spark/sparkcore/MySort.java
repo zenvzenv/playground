@@ -1,4 +1,4 @@
-package zhengwei.spark;
+package zhengwei.spark.sparkcore;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;

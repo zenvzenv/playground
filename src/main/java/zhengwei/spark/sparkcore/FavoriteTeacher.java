@@ -1,4 +1,4 @@
-package zhengwei.spark;
+package zhengwei.spark.sparkcore;
 
 import org.apache.spark.Partitioner;
 import org.apache.spark.SparkConf;
