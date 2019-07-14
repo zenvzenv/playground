@@ -406,3 +406,31 @@
         5. **广播变量是存储在Executor中的MemoryStore中的**
     2. 累加器  
         
+* Spark运行过程
+    1. 集群启动，Master节点和Worker节点启动，Worker节点向Master节点注册汇报自己的资源情况，并定期向Master发送心跳
+    2. 当Application运行到 `JavaSparkContext jsc = new JavaSparkContext(conf);` 时，Driver端就会向Master建立连接并申请资源
+    3. Master收到Driver的申请资源的请求后，开始调度资源
+    4. Master与Worker进行RPC通信，让Worker启动Executor
+    5. Worker去启动Executor，Executor启动线程池以用来执行Task，同时实例化BlockManager，Executor启动完毕之后，Executor跟Driver通信
+    6. 程序中触发Action，开始构建DAG，即有向无环图(调用Spark中的算子)
+        1. DAG描述多个RDD的转换过程，任务执行时，可以按照DAG的描述，执行真正的计算(数据被操作的一个过程)
+        2. DAG是有边界的，有开始(通过SparkContext或者JavaSparkContext创建)，有结束(触发Action，执行run job，一个完整的DAG就形成了)
+        3. 一个Spark Application有多少个DAG，取决于触发了多少次Action，即一个DAG对应一个Job
+        4. 一个RDD只是描述了数据计算过程中的一个环节，而DAG由一个或多个RDD组成，描述了数据计算过程中的所有环节
+        5. 一个DAG可能产生多种不同类型的Task，会有不同的阶段
+    2. DAGScheduler将DAG切分Stage，将Stage中生成的Task以**TaskSet**的形式组成**TaskScheduler**(切分的依据是Shuffle)
+        1. DAGScheduler将一个DAG切分成一个或多个Stage，**切分的唯一依据就是是否产生了Shuffle(宽依赖)**，在切分完Stage之后，先提交之前的Stage，执行完之后再提交后面的Stage，Stage会产生Task，一个Stage中会包含很多业务逻辑相同的Task
+        2. 为什么要进行Stage划分？
+            一个复杂的业务逻辑(将多台机器上具有相同属性的数据聚合到同一台机器上，这个过程我们称之为Shuffle)需要分多个阶段，
+            如果DAG中含有Shuffle，那就意味着前面阶段产生的结果后，才能去执行下一阶段，下一个阶段的计算是依赖上一个阶段的，
+            在同一个Stage中会有多个算子合并在一起组成一条计算逻辑，这就是pipeline(即流水线：严格按照流程、顺序执行)，
+            **在同一个Stage中也会有多个分区，有几个分区就会有几个Task，这些Task的业务逻辑都是相同的，只是要去计算的数据不相同，一个Task里面就会对应一个一条流水线，Task会并行的去执行流水线的中得业务逻辑**
+        3. Shuffle的定义
+            Shuffle的含义是洗牌,将数据打散，父RDD中的一个partition中的数据如果给了子RDD的多个partition这就会产生Shuffle，
+            Shuffle的过程中会产生网络传输，但是有网络传输并不一定是Shuffle
+        4. 宽依赖与窄依赖
+            1. 宽依赖：父RDD中的一个partition给了子RDD的**多个**partition，父RDD中的一个partition对应子RDD中的多个partition
+            2. 窄依赖：父RDD中的一个partition给了子RDD的**一个**partition，父RDD中的partition与子RDD中的partition是一一对应的
+        5. 注意：Spark会根据最后一个RDD从后往前进行依赖关系的推断，因为每个RDD中都会记录父RDD的信息，知道没有父RDD为止
+    3. Stage中的Task会形成TaskSet，然后传递给TaskScheduler，TaskScheduler调度Task(根据资源情况将Task调度到相应的Executor中去执行)，由Dirver把具体的Task发送到Executor中去执行
+    4. Executor接受Task，首先将Task进行反序列化，然后将Task用一个实现了Runnable接口的实现类进行包装，然后将Task放入ThreadPool中去执行
