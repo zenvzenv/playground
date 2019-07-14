@@ -1,4 +1,4 @@
-package zhengwei.spark;
+package zhengwei.spark.sparkcore;
 
 import org.apache.spark.SparkConf;
 import org.apache.spark.api.java.JavaRDD;
