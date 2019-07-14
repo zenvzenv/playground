@@ -1,4 +1,4 @@
-package zhengwei.spark;
+package zhengwei.spark.sparksql;
 
 import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
@@ -9,6 +9,7 @@ import org.apache.spark.sql.types.StructType;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import zhengwei.spark.sparkcore.Person;
 
 import java.util.*;
 
