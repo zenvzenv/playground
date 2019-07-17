@@ -434,3 +434,11 @@
         5. 注意：Spark会根据最后一个RDD从后往前进行依赖关系的推断，因为每个RDD中都会记录父RDD的信息，知道没有父RDD为止
     3. Stage中的Task会形成TaskSet，然后传递给TaskScheduler，TaskScheduler调度Task(根据资源情况将Task调度到相应的Executor中去执行)，由Dirver把具体的Task发送到Executor中去执行
     4. Executor接受Task，首先将Task进行反序列化，然后将Task用一个实现了Runnable接口的实现类进行包装，然后将Task放入ThreadPool中去执行
+* Spark中的对象实例化和序列化的一些总结
+    1. 序列化问题
+        1. 什么时候对象需要实现序列化接口？
+            >一个对象的在Driver端进行了初始化，并且Executor使用到了这个对象，Driver通过网络发送Task给Executor的时候，是通过网络发送给Task的，通过网络势必就要对对象的序列化和反序列化，那么这时对象就要实现序列化接口，以确保Driver可以正常序列化对象，把对象发送给Executor
+            >如果对象的初始化是在Executor中完成的，那么在Driver在发送Task时将不会携带这个对象的信息的，那么这时这个对象是不会通过网络发送给Executor的，而是Executor自己初始化对象的，那么这时对象就不用实现序列化接口
+        2. 如果一个对象在Driver端进行了初始化，在Driver把对象通过网络发送给Executor的时候，一个Executor中可能会有多个Task，发送到Executor的**象在每个Task中会有一份实例**，这样就是有几个Task就会有多少个对象实例
+        3. 如果一个对象是在Executor端进行初始化的，那么在Executor在允许Task的时候，每允许一次算子，就会实例化一个对象实例，有多少条数据就有多少个实例对象，这样会浪费资源降低性能
+        4. 如果是单例对象，在Driver端实例化和在Executor端进行实例化的唯一区别就是该单例对象是否需要实现序列化接口，单例对象在一个JVM进程中只有一份实例存在，不论是从Driver端发送到Executor还是Executor端自己初始化，在Executor的JVM进程中就只会有一份对象实例在内存中，但是在Executor进行初始化的效率应该比在Driver实例化然后发送到Executor端的效率要高，因为在Executor端实例化不需要走网络
