@@ -395,7 +395,8 @@
       }
     ```
     3. Spark会根据shuffle来划分Stage，同一个Stage中的Task的类型是相同的，MapTask或者是ResultTask
-    4. 一共有多少个Task由Stage和Partition共同决定，读取hdfs中文件时，有多少个文件切片就会有多少个Partition，即就会有多少个Task，即这个Stage中一共有Task，如果后续的Stage中没有自己指定分区数的话，那么后续的Stage的分区将和之前的Stage中的分区保持一致，那一共有多少个`Task=Stage*Task`.
+    4. 一共有多少个Task由Stage和Partition共同决定，读取hdfs中文件时，有多少个文件切片就会有多少个Partition，即就会有多少个Task，即这个Stage中一共有Task，如果后续的Stage中没有自己指定分区数的话，那么后续的Stage的分区将和之前的Stage中的分区保持一致，
+       那一共有多少个`一个Job中Task总数=Stage的数量*一个Stage中Task的总数`.
     5. Shuffle分为两个步骤，分别是MapTask和ResultTask，MapTask会把根据分区器的规则把结果溢写到磁盘中然后把最后的结果反馈给Driver，ResultTask会去和Driver通信，获取到MapTask溢写的文件的位置，然后去拉取再做聚合
 * 广播变量和累加器
     1. 广播变量
@@ -442,3 +443,9 @@
         2. 如果一个对象在Driver端进行了初始化，在Driver把对象通过网络发送给Executor的时候，一个Executor中可能会有多个Task，发送到Executor的**象在每个Task中会有一份实例**，这样就是有几个Task就会有多少个对象实例
         3. 如果一个对象是在Executor端进行初始化的，那么在Executor在允许Task的时候，每允许一次算子，就会实例化一个对象实例，有多少条数据就有多少个实例对象，这样会浪费资源降低性能
         4. 如果是单例对象，在Driver端实例化和在Executor端进行实例化的唯一区别就是该单例对象是否需要实现序列化接口，单例对象在一个JVM进程中只有一份实例存在，不论是从Driver端发送到Executor还是Executor端自己初始化，在Executor的JVM进程中就只会有一份对象实例在内存中，但是在Executor进行初始化的效率应该比在Driver实例化然后发送到Executor端的效率要高，因为在Executor端实例化不需要走网络
+* Worker、Executor、Job、Stage、Task和Partition的关系
+    * 一个物理节点上可以有一个或多个Worker，Worker起始是一个JVM进程
+    * 一个Executor可以并行执行多个Task，实际上Executor是一个JVM进程，Task是Executor进程中的一个线程，一个Task至少要独占用Executor中的一个vcore
+    * Executor的个数是由 `--num-executors` 来指定，Executor中有多少个核心是有 `--executor-cores` 来指定的，一个Task要占几个核心是有 `--conf spark.task.cores=1` 来配置，默认一个Task占用一个core
+    * 一个Application中的**`最大并行度=Executor数目*(每个Executor核心数/每个Task要占用的核心数)`**，注意：如果Spark读取的是HDFS上的文件时，Spark会按照一个block来划分分区，比如一个文件的大小时1345MB，一个block块的大小是128MB，那么Spark会生成1345MB/128M=11个Partition
+    * 一个Job中会有一个或多个Stage，一个Stage中会有一个或多个Task，如果一次提交的Task过多，超出了**`最大并行度=Executor数目*(每个Executor核心数/每个Task要占用的核心数)`**的话，那么Task会被分批次执行，每次执行总cores个任务，等有cores空闲下来的时候再去执行剩余的Task
