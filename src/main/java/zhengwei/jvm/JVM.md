@@ -3,8 +3,9 @@
 * zhengwei.jvm.classloader-->学习JVM中类加载过程时测试时写的实例代码，有代码的帮助，理解起来会更加的透彻
     > 类的加载过程是:加载->链接->初始化->使用->卸载<br/>
     > 其中链接分为:验证->准备->解析<br/>
-    __需要特别注意的是准备和初始化是两个过程__<br/>
-    1. 加载：加载是把.class文件加载进JVM之中
+    >__需要特别注意的是准备和初始化是两个过程__<br/>
+    >就算一个类被加载了也不一定会出初始化这个类，只有这个类满足JVM所要求的对类的使用规范时，才会去触发类的初始化流程
+    1. 加载：加载是把.class文件加载进JVM之中，**在JVM规范中，并没明确规定类要在何时被加载，这点交由JVM具体实现来自友把控**
         1. 加载类的方式有从本地直接加载；通过网络下载.class文件；从jar中加载；从专有数据库中加载和将Java动态编译成.class文件
         2. 类加载器
             1. 类加载器是用来把类加载进JVM中的，从JDK1.2开始，类加载采用**双亲委托机制**，这种机制保证了JVM平台的安全性。在此委托机制中，除了JVM自带的根类加载器外，其余的类加载器都有且只有一个父类加载器。
@@ -122,11 +123,11 @@
                 5. 如果两个加载器之间没有直接或间接的关系，那么它们各自加载的类将互不可见。[zhengwei.jvm.classloader.TestClassLoader3.testClassLoaderNamespace]
             8. 创建自定义类加载器，只需要继承 `java.lang.ClassLoader` 类，然后重写 `findClass(String name)` 方法即可，该方法根据指定的类的二进制名字，返回对应的Class对象的引用。
     2. 链接：将类与类之间的关系处理好
-        1. 验证：校验.class文件的正确性；语义检查；字节码验证和二进制兼容性验证，把加载的类的二进制文件合并到JVM中去。
-        2. 准备：为类的**静态变量**分配内存空间，并将其**赋初始值**，在到达初始化之前，类的静态变量知识只是jvm赋予的默认值，而不是真正的用户指定的值
+        1. 验证：校验.class文件的正确性；语义检查；字节码验证和二进制兼容性验证，把加载的类的二进制文件合并到JVM中去，**验证阶段是很重要的，但也不是必须的，它对运行期没有任何影响，可以使用JVM参数 `-Xverifynone` 来关闭大部分的类严重工作，以缩短类加载时间**
+        2. 准备：为类的**静态变量**分配内存空间，并将其**赋初始值**，比如八种基本变量的默认值，如果是引用变量的话其默认值是null，在到达初始化之前，类的静态变量知识只是jvm赋予的默认值，而不是真正的用户指定的值，**这些变量都是在方法区中分配内存的**，**如果被 `final` 修饰的话，那么在准备阶段其值就已经是指定的值了**
         3. 解析：将类中常量池中寻找类、接口、字段和方法的符号引用替换成直接引用的过程
-    3. 初始化：为类的静态变量赋予正确的默认值，就是把链接阶段中的准备阶段的类的静态变量的默认值赋予用户指定的初始值
-        1. 类的初始化时机
+    3. 初始化：为类的静态变量赋予正确的默认值(用户指定的初始值)，就是把链接阶段中的准备阶段的类的静态变量的默认值赋予用户指定的初始值
+        1. 类的初始化时机(**特别注意：即使一个类被类加载器加载了，也不一定会去初始化这个类，因为JVM只会在一下几种情况出现的时候才会去初始化一个类，其余的时候是不会去初始化这个类的**)
             1. 创建的类的实例
             2. 访问某个类或接口的静态变量(字节码中使用`getstatic`标记)，或者对静态变量进行赋值(字节码中使用`putstatic`标记)，或者调用类的静态方法(字节码中使用`invokestatic`)
             3. 反射Class.forName("zhengwei.jvm.Test");调用一个参数的Class.forName("xxxxx");是会默认初始化该类的，源码中是有体现的。
@@ -158,12 +159,64 @@
             1. 在初始化一个接口的时候并不会初始化它的父接口。
             2. 因此，一个父接口并不会因为它的父接口或者实现类被初始化而被初始化，只有当程序首次使用了该接口的特定接口的静态变量时才会导致该接口的初始化。
         6. **调用ClassLoader的loadClass方法加载一个类时，并不是对类的主动使用，不会导致类的初始化。**
+        7. **初始化阶段就是执行类构造器<clinit>()的过程，<clinit>()方法是编译器收集类中所有的类变量赋值操作和static代码块的语句合并产生的，并严格按照语句在源代码中出现的顺序依次收集到<clinit>()方法中**
+        8. JVM会保证**类构造器<clinit>()在多线程环境中被正确的加锁、同步**，如果有多个线程去初始化同一个类，那么只会有一个线程去执行类构造器<clinit>()，其他线程需要阻塞等待，直到活动线程执行<clinint>()完毕，
+           **需要特别注意的是：虽然其他线程在同一个类加载器下，一个类型只会被加载一次**
+        ```java
+        public class TestClassClinitMethod {
+        	static {
+        		System.out.println("TestClassClinitMethod init ...");
+        	}
+        	/*static {
+        		System.out.println(Thread.currentThread()+" enter");
+        		try {
+        			Thread.sleep(5_000L);
+        		} catch (InterruptedException e) {
+        			e.printStackTrace();
+        		}
+        		System.out.println(Thread.currentThread()+" exit");
+        	}*/
+        	private static class ClassClinit{
+        		static {
+        			System.out.println(Thread.currentThread()+" enter");
+        			try {
+        				Thread.sleep(5_000L);
+        			} catch (InterruptedException e) {
+        				e.printStackTrace();
+        			}
+        			System.out.println(Thread.currentThread()+" exit");
+        		}
+        	}
+        
+        	public static void main(String[] args) {
+        		Runnable runnable= () -> {
+        			System.out.println(Thread.currentThread()+" start");
+        			ClassClinit t=new ClassClinit();
+        			System.out.println(Thread.currentThread()+" over");
+        		};
+        		new Thread(runnable,"t1").start();
+        		new Thread(runnable,"t2").start();
+        	}
+        }
+        /* Output: 
+                TestClassClinitMethod init ...
+                Thread[t1,5,main] start
+                Thread[t2,5,main] start
+                Thread[t1,5,main] enter
+                因为JVM保证<clinit>()方法线程安全，线程休眠期间Thread[t2,5,main]被阻塞，当<clinit>()执行完毕之后，Thread[t2,5,main]将不会再去执行<clinit>()方法
+                Thread[t1,5,main] exit
+                Thread[t1,5,main] over
+                Thread[t2,5,main] over
+         *///:~
+        ```
     4. 使用：
         1. 实例化对象：
             * 为类的新实例分配内存空间，通在堆上分配内存空间
             * 为实例赋予默认值
             * 为实例赋予指定的默认值
                 **注意：Java编译器为它编译的每个类都至少生成一个初始化方法。在Java的.class文件中这个实例化方法被称为<init>，针对源代码中的一个构造方法，Java编译器都会产生一个<init>方法**
+        2. 实例化一个对象需要经历如下几个过程
+            * **父类类构造器<clinit>()->子类类构造器<clinit>()->父类成员变量赋值和实例代码块->父类的构造函数<init>()->子类的成员变量赋值和实例代码块->子类的构造函数<init>()**
     5. 卸载：把类的相关信息从内存中剔除
         1. 当一个类被加载、链接和初始化之后，它的生命周期就开始了。只有当该类不再被引用时，即不可触及时，class对象就结束了它的生命周期，该类的信息将会在方法区卸载，从而结束生命周期。
         2. 一个类何时结束生命周期取决于代表它的class对象何时结束生命周期。
