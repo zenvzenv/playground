@@ -449,3 +449,16 @@
     * Executor的个数是由 `--num-executors` 来指定，Executor中有多少个核心是有 `--executor-cores` 来指定的，一个Task要占几个核心是有 `--conf spark.task.cores=1` 来配置，默认一个Task占用一个core
     * 一个Application中的**`最大并行度=Executor数目*(每个Executor核心数/每个Task要占用的核心数)`**，注意：如果Spark读取的是HDFS上的文件时，Spark会按照一个block来划分分区，比如一个文件的大小时1345MB，一个block块的大小是128MB，那么Spark会生成1345MB/128M=11个Partition
     * 一个Job中会有一个或多个Stage，一个Stage中会有一个或多个Task，如果一次提交的Task过多，超出了**`最大并行度=Executor数目*(每个Executor核心数/每个Task要占用的核心数)`**的话，那么Task会被分批次执行，每次执行总cores个任务，等有cores空闲下来的时候再去执行剩余的Task
+* 如果一个Executor调用了一个工具类的静态方法，在Executor端调用，那就是在Executor端对这个类首次使用，那么Executor所在的JVM进程就会去加载该类并进行初始化操作(该类所在jar应该是提前通过--jars参数来指定，并发送到了各个Executor中)，
+  因为是静态方法，是属于类的，所以会被加载到JVM的方法区中(对于Hotspot虚拟机来说)，也就只存在一份。
+* Spark SQL笔记
+    1. 在Spark1.x中，使用SQLContext是SparkSQL的操作入口，在Spark2.x中，改用了SparkSession作为SparkSQL的操作入口
+    2. UDF(user define function):
+        1. UDF：输入一行，返回一个结果，输入与输出是一对一的关系，
+        2. UDTF：输入一行，返回多行数据，输入与输出是一对多的关系
+        3. UDAF：输入多行，经过聚合(aggregate)之后返回一行，输入与输出是多对一的关系，count,sum等聚合函数是Spark自带的聚合函数，但是遇到复杂的业务逻辑时，需要我们自定义聚合函数
+        4. UDF和UDAF的实例详情见代码zhengwei.spark.sparksql.SparkSQL中
+    3. 注意：**在创建Dataset时，如果使用的是Java的实体类进行Schema关联的时候，这个实体类的访问权限必须是 `public` 的否则会报Caused by: java.util.concurrent.ExecutionException: org.codehaus.commons.compiler.CompileException: File 'generated.java'错**
+    4. SparkSQL中的join操作是会产生大量shuffle的，最好避免join操作，**推荐使用广播变量+自定义函数的方式进行对数据的聚合**，这样会减少shuffle提高效率
+    5. Spark SQL中所产生的DataFrame和Dataset都是基于RDD的，DataFrame里面存放了结构化数据的描述信息，DataFrame有表头(表的描述信息)，描述了有多少列，每一列叫什么名字、什么类型和能不能为空即 `RDD+Schema=DataFrame`
+    6. DataFrame和Dataset既然都是基于RDD的，那么这两者都是RDD所具有的基本属性，transformation是懒加载的，action触发transformation的执行
