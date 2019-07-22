@@ -59,9 +59,39 @@ public class VolatileKeyWord {
 		}, "writer").start();
 		Thread.sleep(10_000L);
 	}
+
 	/**
-	 * 内存
-	 * RAM
-	 * CPU寄存器
+	 * 基本变量在赋值时是原子性的，可以通过字节码来看出这一点
 	 */
+	static void baseTypeAtomic(){
+		int a=10;
+		System.out.println();
+		int b=a;
+		System.out.println();
+		a++;
+		a=a+1;
+	}
+	private static volatile int initValue=0;
+	private static final int maxValue=5;
+	public static void main(String[] args) {
+		new Thread(()->{
+			int localValue=initValue;
+			while (localValue<maxValue){
+				System.out.println("The value update to "+initValue);
+				localValue=initValue;
+			}
+		},"reader").start();
+		new Thread(()->{
+			int localValue=initValue;
+			while (localValue<maxValue){
+				System.out.println("Update the value to "+ ++localValue);
+				initValue=localValue;
+				try {
+					Thread.sleep(500);
+				} catch (InterruptedException e) {
+					e.printStackTrace();
+				}
+			}
+		},"updater").start();
+	}
 }
