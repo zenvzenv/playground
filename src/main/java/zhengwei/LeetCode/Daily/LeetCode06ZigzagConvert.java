@@ -35,27 +35,26 @@ package zhengwei.LeetCode.Daily;
  */
 public class LeetCode06ZigzagConvert {
 	public String convert(String s, int numRows) {
-		char[] c = s.toCharArray();
-		int length = c.length;
+		char[] chars = s.toCharArray();
+		int length = chars.length;
 		//横向Z字
 		StringBuilder[] sb = new StringBuilder[numRows];
-		//初始化StringBuilder数组
-		for (int i = 0; i < sb.length; i++) {
-			sb[i] = new StringBuilder();
+		for (int index = 0; index < numRows; index++) {
+			sb[index] = new StringBuilder();
 		}
 		int i = 0;
 		while (i < length) {
-			//Z字上横线需要遍历整个StringBuilder数组
-			for (int idx = 0; idx < numRows && i < length; idx++) {
-				sb[idx].append(c[i++]);
+			//对于Z字上边的一横，需要全部遍历
+			for (int index = 0; index < numRows && i < length; index++) {
+				sb[index].append(chars[i++]);
 			}
-			//Z字下横线只需要遍历去头和去尾之间的StringBuilder索引位
-			for (int idx = numRows - 2; idx >= 1 && i < length; idx--) {
-				sb[idx].append(c[i++]);
+			//对于Z字的斜线只需要去头和去尾的长度即可
+			for (int index = numRows - 2; index > 0 && i < length; index--) {
+				sb[index].append(chars[i++]);
 			}
 		}
-		for (int idx = 1; idx < sb.length; idx++) {
-			sb[0].append(idx);
+		for (int index = 1; index < numRows; index++) {
+			sb[0].append(sb[index]);
 		}
 		return sb[0].toString();
 	}
