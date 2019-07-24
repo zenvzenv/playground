@@ -61,7 +61,7 @@ public class SparkSQLMultipleDataSource {
 		//1.将结果写入到普通文本文件中(只能输出一列数据，不支持多列数据)
 //		result.write().text("e:/temp/spark/sql/text");
 		//将结果保存为json文件
-//		result.write().json("e:/temp/spark/sql/json");
+		result.write().json("e:/temp/spark/sql/json");
 
 		//将结果保存为csv文件
 		result.write().csv("e:/temp/spark/sql/csv");
@@ -75,12 +75,35 @@ public class SparkSQLMultipleDataSource {
 	@Test
 	void csvDataSource() {
 		Dataset<Row> csvDS = spark.read().csv("e:/temp/spark/sql/csv");
+		//自带的Schema为_c0,_c1...
 		csvDS.printSchema();
+		//自己只对Schema
 		Dataset<Row> personDS = csvDS.toDF("name", "age");
+		csvDS.printSchema();
 		personDS.show();
 	}
-	@Test
 
+	/**
+	 * 以json作为数据源
+	 */
+	@Test
+	void jsonDataSource(){
+		Dataset<Row> jsonDS = spark.read().json("e:/temp/spark/sql/json");
+		jsonDS.printSchema();
+		jsonDS.show();
+	}
+
+	/**
+	 * 以parquet作为数据源
+	 * parquet是列式存储的一种文件格式，SparkSQL可以指定读取parquet的指定的列，过滤掉不需要的列，只读取必要信息，提高效率
+	 * (有待完善)
+	 */
+	@Test
+	void parquetDataSource(){
+		Dataset<Row> parquetDS = spark.read().parquet("e:/temp/spark/sql/parquet");
+		parquetDS.printSchema();
+		parquetDS.show();
+	}
 	@AfterAll
 	static void close() {
 		spark.stop();
