@@ -163,4 +163,23 @@ class SparkOperator implements Serializable {
         });
         map03.foreach(x-> System.out.println(x));
     }
+
+    /**
+     * 一个Application中有几个Action算子就会有几个Job
+     *
+     */
+    @Test
+    void testJobAlone(){
+        JavaRDD<String> map = rdd3.map(x -> {
+            System.out.println(x);
+            x += "_map";
+            return x;
+        });
+        JavaRDD<String> filter = map.filter(x -> {
+            System.out.println(x);
+            return x.contains("zw");
+        });
+        filter.collect();
+        filter.collect();
+    }
 }
