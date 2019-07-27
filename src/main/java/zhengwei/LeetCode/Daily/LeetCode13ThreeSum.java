@@ -27,13 +27,13 @@ import java.util.List;
 public class LeetCode13ThreeSum {
 	public List<List<Integer>> threeSum(int[] num) {
 		List<List<Integer>> result = new ArrayList<>();
-		if (num == null || num.length < 3) return null;
+		if (num == null || num.length < 3) return result;
 		int baseIndex = 0;
 		//因为是无序数组，需要先对数据进行排序
 		Arrays.sort(num);
 		while (baseIndex < num.length - 2) {
 			int base = num[baseIndex];
-			int left = 0;
+			int left = baseIndex + 1;
 			int right = num.length - 1;
 			while (left < right) {
 				int sum = base + num[left] + num[right];
@@ -76,7 +76,7 @@ public class LeetCode13ThreeSum {
 	/**
 	 * 右指针向左移动
 	 *
-	 * @param num 数组
+	 * @param num   数组
 	 * @param right 右指针
 	 * @return 右指针满足条件的索引位置
 	 */
