@@ -240,4 +240,245 @@
                 3. 由于变量i没有被volatile修饰，所以不满足volatile变量原则
                 4. 传递规则也是不满足的<br/>
                 所以我们是不能够通过happens-before原子来推导出ThreadA happens-before ThreadB，虽然在时间上ThreadA先于ThreadB执行的，但是就是无法确定ThreadB获得的结果是什么，所以这段代码是线程不安全的。那么需要对变量i加上volatile修饰或者给两个方法加锁即可满足happens-before原则
+* volatile、synchronized和JMM系统阐述
+    1. synchronized
+        1. synchronized保证了同一时刻只有一条线程可以执行某个方法或者某个代码块(主要是对方法或者代码块中的共享变量的操作)
+        2. synchronized可以保证一个线程的变化(主要是共享变量的变化)被其他线程看见(保证可见性。完全可以替代volatile的作用)
+        3. synchronized的三种应用方式
+            1. 修饰实例方法，作用于当前实例加锁即锁定的是this对象，想要进入同步代码块需要先获取this对象的锁
+            2. 修饰静态变量，作用于当前class对象加锁，想要进入同步代码块需要先获取当前class对象的锁
+            3. 修饰代码块，指定加锁对象，给给定对象加锁，想要进入同步代码块需要先获取给定对象的锁
+        4. JVM中的同步(synchronized)是基于**进入管程(entermonitor)**和**退出管程(exitmonitor)**来实现的，无论是显示同步(即synchronized修饰的是代码块)还是隐式同步(即synchronized修饰在方法上)都是如此
+            1. 显示同步：synchronized修饰的是代码块，有明显的entermonitor和exitmonitor指令
+            2. 隐式同步：synchronized修饰的是方法，JVM使用ACC_SYNCHRONIZED标志来隐式实现同步
+        5. 理解Java对象头与monitor(这里先对重量级锁即对象多进行阐述)
+            1. 在JVM中对象(不包括数组)的组成一般有对象头，实例变量和填充数据
+                1. 实例变量：存放类的属性信息，包括父类的属性，如果是数组还会包含数组的长度，这部分内存按4字节对齐
+                2. 填充数据：由于JVM要求对象的起始地址必须为8字节的整数倍。填充数据不是必须的仅仅是为了对其数据
+                3. 对象头：是实现synchronized的基础，一般而言synchronized使用的锁对象是存储在Java对象头中的，JVM用两个字节来存储对象头(如果是数组的话会JVM会用三个字节存储对象头，多出来的一个字节用于存储数组长度)<br/>
+                    | 虚拟机位数 | 头对象结构        | 说明                                                                      |
+                    | ---------- | ---------------------- | --------------------------------------------------------------------------- |
+                    | 32/64bit   | Mark Word              | 存储对象的hashcode，分代年龄，所信息或GC标志等信息      |
+                    | 32/64bit   | Class Metadata Address | 类型指针指向对象的类元数据，JVM通过这个这个指针确定这个类是属于哪个类的实例 |
+                4. Mark Word的具体结构<br/>
+                    | 锁状态 | 25bit        | 4bit         | 1bit是否为偏向锁 | 2bit锁标志位 |
+                    | -------- | ------------ | ------------ | ---------------- | ------------ |
+                    | 无锁状态 | 对象hashcode | 对象分代年龄 | 0                | 01           |
+                5. 每个对象都存储着一个monitor与之关联，对象与其monitor之间的关系存在多种实现方式，如monitor可以与对象一起创建和销毁或当线程试图获取对象锁时自动生成，但当一个monitor被某个线程持有后，它便处于锁定状态
+                   在JVM(Hotspot)中，monitor是由ObjectMonitor来实现，其数据结构如下：
+                   ```c++
+                   ObjectMonitor() {
+                       _header       = NULL;
+                       _count        = 0; //记录个数
+                       _waiters      = 0,
+                       _recursions   = 0;
+                       _object       = NULL;
+                       _owner        = NULL;
+                       _WaitSet      = NULL; //处于wait状态的线程，会被加入到_WaitSet
+                       _WaitSetLock  = 0 ;
+                       _Responsible  = NULL ;
+                       _succ         = NULL ;
+                       _cxq          = NULL ;
+                       FreeNext      = NULL ;
+                       _EntryList    = NULL ; //处于等待锁block状态的线程，会被加入到该列表
+                       _SpinFreq     = 0 ;
+                       _SpinClock    = 0 ;
+                       OwnerIsThread = 0 ;
+                     }
+                   ```
+                   **ObjectMonitor中有两个队列，_WaitSet和_EntryList，用来保存ObjectWaiter列表(每个等待锁的线程都会被封装成ObjectWaiter对象)，_owner指向持有ObjectMonitor对象的线程，
+                   当多个线程同时访问同一段同步代码时，首先会进入_EntryList集合，当线程获取对象monitor之后进入_Owner区域并把monitor中的_owner变量设置为当先线程同时monitor中的计数器_count加一(这也是synchronized可重入的重要原因)，
+                   若线程调用 `wait()` 方法，将释放当前持有的monitor，_owner变量恢复成null，_count变量自减一，同时该线程进入_WaitSet集合中等待被唤醒，从_WaitSet中被唤醒的线程首先会被放到_EntryList集合中，
+                   在_EntryList集合中的线程会去争抢monitor，强盗monitor的线程进入RUNNABLE状态，等待被CPU调用。若当前线程执行完毕也将释放monitor并复位ObjectMonitor中的变量，以便其他线程进入monitor。**
+                6. monitor对象存在与每个Java对象的对象头中(存储的时monitor对象(ObjectMonitor)的指针)，synchronized锁便是通过这种方式获取锁的，也就是说所有的Java对象都可以作为synchronized的锁对象，同时 `wait(),notify(),notifyAll()` 方法处于Object类中的原因
+        6. synchronized代码块底层原理
+            1. 定义一个synchronized代码块
+            ```java
+            private void test(){
+                synchronized (object){
+                    System.out.println("hello synchronized");
+                }
+            }
+            ```
+            通过 `javap -verbose -p ` 命令来反编译class文件可以得到字节码信息
+            ```text
+             0 aload_0
+             1 getfield #11 <zhengwei/jvm/bytecode/TestByteCode2.object>
+             4 dup
+             5 astore_1
+             6 monitorenter    //进入同步方法
+             7 getstatic #12 <java/lang/System.out>
+            10 ldc #13 <hello synchronized>
+            12 invokevirtual #14 <java/io/PrintStream.println>
+            15 aload_1
+            16 monitorexit //退出同步方法
+            17 goto 25 (+8)
+            20 astore_2
+            21 aload_1
+            22 monitorexit //退出同步方法
+            23 aload_2
+            24 athrow
+            25 return
+            ```
+            从字节码中可以看出同步代码块的实现原理时通过monitorenter和monitorexit指令来实现的，其中monitorenter是同步代码块开始的地方，monitorexit是代码块结束的地方，
+            当执行monitorenter指令时，当先线程将试图获取objectref(即锁对象)所对应的monitor持有权(即monitor对象对应的ObjectMonitor中)，当objectref的monitor的计数器为0时(ObjectMonitor中的_count为0)，
+            那么线程会成功获objectref的monitor即锁，并将_count置为1，取锁成功。如果当前线程以及持有了objectref的monitor的持有权，那么它可以重入这个monitor，重入时会将_count的值自加1。
+            徜若其他线程已经拥有的objectref的monitor的持有权，那当前线程被阻塞，直到正在执行的线程执行完毕，即monitorexit执行被执行，执行线程释放monitor并将_count置为0，其他线程才有机会去获取objectref的monitor。
+            **值得注意的是，编译器会保证方法无论以何种方式结束(异常结束还是正常)，都会去调用monitorexit指令，使得一条monitorenter指令对应一条monitorexit，确保同步方法被正常的退出，编译器会自动生成一个处理所有异常异常处理器，它的目的就是用来执行monitorexit的**
+        7. synchronized方法底层原理
+            1. 方法级别的同步是隐式的，无需通过字节码指令来控制，它实现在方法调用和返回操作中。JVM可以在方法区常量池中的方法表结构(method_info Structure)中的ACC_SYNCHRONIZED访问标志区分一个方法是不是同步方法。
+               当调用方法时，调用指令会先检查方法的ACC_SYNCHRONIZED访问标志是否被设置了，如果设置了，执行线程会先去持有monitor(管程)，然后再去执行方法，最后在方法完成(无论是正常退出还是异常退出)时释放monitor。
+               在方法调用期间，执行线程持有了monitor，其他任何线程都无法再获取同一个monitor。如果一个同步方法执行期间抛出了异常，并且方法内部无法处理异常，那么这个同步方法持有的monitor将在异常抛到同步方法之外时自动释放
+            2. 定义一个同步方法
+                ```java
+                private synchronized static void test2(){
+                    System.out.println("do nothing");
+                }
+                ```
+                反编译之后的字节码如下：
+                ```text
+                 private static synchronized void test2();
+                    descriptor: ()V
+                    flags: ACC_PRIVATE, ACC_STATIC, ACC_SYNCHRONIZED
+                    Code:
+                      stack=2, locals=0, args_size=0
+                         0: getstatic     #12                 // Field java/lang/System.out:Ljava/io/PrintStream;
+                         3: ldc           #15                 // String do nothing
+                         5: invokevirtual #14                 // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+                         8: return
+                    LineNumberTable:
+                        line 60: 0
+                        line 61: 8
+                ```
+               从字节码中可以看出，synchronized修饰的方法并没有monitorenter和monitorexit指令，取而代之的是ACC_SYNCHRONIZED访问标识，标识该方法是一个同步方法。JVM通过ACC_SYNCHRONIZED标志位来判断该方法是否是同步方法，从而进行相应的调用。
+        8. JVM对synchronized的优化
+            1. 锁的状态分为四种：无锁状态、偏向锁、轻量级锁和重量级锁，随着锁的竞争，锁可以从偏向所升级到轻量级锁，再升级到重量级锁，**锁的升级是单向的，也就是说锁只能从低到高升级，而不能降级**
+            2. 偏向锁
+                * 偏向锁是Java6之后新加的锁，它是一种针对加锁操作的优化手段。在大多数情况下，锁不仅不存在多线程竞争的情况，而且总是由同一线程多次获得，因此为了减少同一线程获取锁的代价(会涉及到一些CAS操作，比较耗时)而引入偏向锁。
+                * 偏向锁的核心思想，如果一个线程获取了锁，那么锁进入偏向模式，此时Mark Word的结构也变成偏向锁结构，当这个线程再次请求时，无需再做任何同步操作，即可获得锁，这样省去了大量有关锁的申请操作，从而提高程序性能。
+                * 对于没有锁竞争的场合，偏向锁由很好的优化效果，毕竟极有可能连续多次是同一个线程申请相同的锁。
+                * 但是对于锁进展较为强烈的场合，偏向锁就失效了，因为这样的场合极有可能每次申请的线程都不一样，因此该场合下使用偏向锁会得不偿失，**需要注意的是：偏向锁失效后并不会立即膨胀为重量级锁，而是先升级为轻量级锁**
+            3. 轻量级锁
+                * 倘若偏向锁失效，JVM并不会将锁立即升级成重量级锁，JVM会尝试使用一中称为轻量级锁的优化手段(Java6之后加入)，此时Mark Word的结构变为轻量级锁结构。
+                * 轻量级锁的核心思想：对绝大部分锁，再整个同步周期内不存咋竞争，**注意：这是经验之谈，需要了解的是，轻量级锁锁使用的场景是线程交替执行同步代码块的场景，如果存在同一时间访问同一锁的场合，轻量级锁就会膨胀为重量级所**
+            4. 自旋锁
+                * 轻量级锁失效后，JVM为了避免线程真实的在操作系统中挂起，还会进行一段称为自旋锁的优化手段。
+                * 自旋锁的核心思想：在大多数情况下，线程持有锁的时间不会太长，如果直接挂起操作系统层面的线程可能会得不偿失，毕竟操作系统实现线程之间的切换时需要从用户态转换成核心态，这个状态的转换的需要相对较长的时间，时间成本较高，
+                  因此自旋锁假设在不久的将来，当前线程可以获取到锁，因此JVM会让当前想要获取锁的线程做几个空循环(这就是被称为自旋的原因)，一般不会太久，可能时50~100个循环，在经过若干次循环后，如果得到了锁，就进入临界区，如果还获取不到锁，
+                  那就会将线程在操作系统层面挂起，这就是自旋锁的优化方法，可以提升效率
+                * 如果自旋锁还是获取不到锁的话，最终膨胀成重量级锁
+            5. 软消除
+                * 软消除是JVM的另一种锁的优化，这种优化更彻底，Java在JIT(Just In Time，即时编译)，通过上下文扫描，去除不可能存在共享资源竞争的锁，通过这种方法消除没有必要的锁，可以节省毫无意义的请求锁的时间。
+                ```java
+                /**
+                 * 消除StringBuffer同步锁
+                 */
+                public class StringBufferRemoveSync {
                 
+                    public void add(String str1, String str2) {
+                        //StringBuffer是线程安全,由于sb只会在append方法中使用,不可能被其他线程引用
+                        //因此sb属于不可能共享的资源,JVM会自动消除内部的锁
+                        StringBuffer sb = new StringBuffer();
+                        sb.append(str1).append(str2);
+                    }
+                
+                    public static void main(String[] args) {
+                        StringBufferRemoveSync rmsync = new StringBufferRemoveSync();
+                        for (int i = 0; i < 10000000; i++) {
+                            rmsync.add("abc", "123");
+                        }
+                    }
+                
+                }
+                ```
+        9. synchronized的关键点
+            1. synchronized的可重入性
+                * 从互斥锁的设计上来说，当一个线程试图操作一个由其他线程持有的对象锁上网临界区时，将会处于阻塞状态，但当一个线程再次请求自己持有对象锁的临界区资源时，这种情况属于重入锁，请求将会成功，在Java中synchronized时基于原子性的内部锁机制，
+                  是可重入的，因此在一个线程调用synchronized方法的同时在其他方法内部该对象的另一个synchronized方法时，也就是说一个线程得到一个对象锁后再次请求该对象锁时允许的，这就是synchronized可重入性
+                  ```java
+                    /**
+                     * 测试下synchronized的可重入锁
+                     * synchronized是可重入锁->线程child1获得了Child child = new Child();这个实例的锁，再去调用这个对象中其他的加锁方法也是被允许的不需要重新申请锁(包括父类的synchronized方法)
+                     * 但如果synchronized调用的方法的锁被其他线程持有，那还是要等锁释放之后才能获得锁去执行。
+                     *
+                     * @author zhengwei AKA Awei
+                     * @since 2019/7/18 11:01
+                     */
+                    public class TestSynchronizedReentrant {
+                    	public static void main(String[] args) {
+                    		Child child = new Child();
+                    		Parent parent = new Parent();
+                    //		new Thread(parent::parentDoSomething, "parent1").start();
+                    //		new Thread(parent::parentDoSomething, "parent2").start();
+                    		new Thread(Parent::parentDoSomething, "parent1").start();
+                    		new Thread(child::childDoSomething, "child1").start();
+                    	}
+                    }
+                    
+                    class Parent {
+                    	synchronized static void parentDoSomething() {
+                    		try {
+                    			System.out.println("Parent do something ->" + Thread.currentThread().getName() + " start");
+                    			Thread.sleep(100_000L);
+                    			System.out.println("Parent do something ->" + Thread.currentThread().getName() + " end");
+                    		} catch (InterruptedException e) {
+                    			e.printStackTrace();
+                    		}
+                    	}
+                    }
+                    
+                    class Child extends Parent {
+                    	synchronized void childDoSomething() {
+                    		try {
+                    			System.out.println("Child do something ->" + Thread.currentThread().getName() + " start");
+                    //			Thread.sleep(5_000L);
+                    			childDoAnotherThing();
+                    			System.out.println("Child do something ->" + Thread.currentThread().getName() + " end");
+                    		} catch (Exception e) {
+                    			e.printStackTrace();
+                    		}
+                    	}
+                    
+                    	private synchronized void childDoAnotherThing() {
+                    		try {
+                    			System.out.println("Child do another thing ->" + Thread.currentThread().getName() + " start");
+                    //			Thread.sleep(5_000L);
+                    			parentDoSomething();
+                    			System.out.println("Child do another thing ->" + Thread.currentThread().getName() + " end");
+                    		} catch (Exception e) {
+                    			e.printStackTrace();
+                    		}
+                    	}
+                    }
+                  ```
+                  正如代码所演示的，如果一个线程获得某个实例对象的monitor之后进入synchronized代码块中，并在同步代码调用了该实例的另一个同步代码块，再次请求时，江北允许，这就是重入的最直接体现，
+                  **需要注意的时，子类也是可以通过重入锁调用父类的同步方法，注意由于synchronized是基于monitor实现的，因此每重入一次，monitor的_count自加1**
+            2. 线程中断与synchronized
+                * 中断线程，把线程的中断标志位置为true
+                * Java提供三个中断方法
+                    ```java
+                    //中断线程（实例方法）
+                    public void Thread.interrupt();
+                    
+                    //判断线程是否被中断（实例方法）
+                    public boolean Thread.isInterrupted();
+                    
+                    //判断是否被中断并清除当前中断状态（静态方法）
+                    public static boolean Thread.interrupted();
+                    ```
+                * 对于NEW和TERMINATED状态的线程来说，调用interrupt是没有任何意义的，Java会对这两种状态的线程忽略interrupt
+                * 对于RUNNABLE状态的线程(没有获取到CPU执行权的线程)，调用interrupt之后，只是设置了该线程的中断标志，并不会让线程实际中断，想要发现线程是否真的中断需要用去程序去判断那么问题来了，我们既然不能真正的中断，那么要我们要中断标志干嘛呢？这里其实是把线程的生杀大权交给我们自己去判断，Java给我们一个标志位来让让我们自己去决策接下来要干嘛，我们可以判断标志位然后去中断我们的程序而不是强制的终止系统
+                * 对于BLOCKED状态(竞争CPU执行权失败而被挂起的线程)的线程来说，发起interrupt方法只是会设置中断的标志位，并不会对线程造成影响
+                * WAITING和TIMED_WAITING状态(sleep,wait,join...)的线程，在触发interrupt的时候会抛出InterruptedException异常，同时会设置中断标志
+                * 具体代码参见zhengwei.thread.chapter04.ThreadInterrupt
+            3. 等待唤醒机制与synchronized
+                * 所谓的等待唤醒机制重要指的是 `wait(),notify(),notifyAll()` 这三个方法，在使用这三个方法时，必须是在synchronized代码块中或者synchronized方法中，否则会抛出IllegalMonitorStateException异常，这是因为调用这几个方法前必须拿到当前对象的监视器monitor对象，也就是说这三个方法依赖于monitor对象
+                * 在前面的分析中我们知道monitor存在与对象头中的Mark Word中(存储monitor对象的指针)，而synchronized关键字可以获取monitor，这就是为什么 `wait(),notify(),notifyAll()` 这三个方法要在synchronized代码块内部执行的原因了
+                * 需要特别注意的一点是：wait方法会释放锁，sleep方法不会释放锁，线程wait之后，直到notify或notifyAll将其唤醒方能继续执行。
+    2. JMM
+        1. 理解Java内存区域与Java内存模型
+            1. Java内存区域(这里不做过多阐述，详情参见[zhengwei.jvm.JVM.md](https://github.com/zw030301/playground/blob/master/src/main/java/zhengwei/jvm/JVM.md))
+                1. 方法区(Method Area)：线程共享，又名Non-heap，只要用于存储已被JVM加载的类的信息、常量、静态变量，即时编译器编译之后的代码等数据，根据JVM规范当方法区无法满足内存分配需求时，将会派出OutOfMemoryError异常。
+                                       值得注意的是，方法区存在一个运行时常量池(Runtime Constant Pool)的区域，它主要存储编译器生成的各种字面量和符号引用，这些内容将在类加载后放入运行时常量池中，以便后续使用
+                2. 堆(Heap)：线程共享，在虚拟机启动时创建，主要存放对象的实例，几乎所有的对象都在这里分配内存，GC的主要收集区域就是堆，根据JVM规范规定，如果堆中没有内存来完成实例分配，并且堆无法扩展，将会抛出OutOfMemoryError异常
+                3. 程序计数器(Program Counter Register)：线程私有，
