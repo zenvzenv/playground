@@ -22,7 +22,7 @@
             1. RDD的创建：我们可以从hdfs、hive、hbase和集合数据类型(makeRDD,parallelize)中获取读取数据并获得RDD，也可以通过一个RDD的转换得到另一个RDD
             2. RDD的转换：Spark提供一系列的转换RDD算子，用来对数据的转换，例如map,flatMap,reduceByKey...，转换算子是懒执行的，需要有行动算子触发转换算子的执行
             3. RDD的缓存：如果一个RDD的血统过长，那么在数据都是进行重算时效率将会很低，那么我们可以把后续需要用到的RDD进行缓存起来，这样Spark会切断血统，提升重算效率
-            4. RDD的行动：行动算子用来触发转换算子的执行，一个application中有几个job取决于有几个行动算子
+            4. RDD的行动：行动算子用来触发转换算子的执行，一个application中有几个job取决于有几个行动算子，**有几个Action算子就会有几个Job，Job与Job之间的Stage是不共用的，每个Job的Stage划分是独立划分的。**
             5. RDD的输出：Spark可以将得到的结果输出到hdfs上，也可以时本地文件系统，还可以收集最终结果到一个集合中以供后续操作
 * 算子
     预先输出的RDD，注意RDD中是不存数据的，只存运算的逻辑，RDD生成的Task来执行真正的计算
@@ -416,7 +416,7 @@
     6. 程序中触发Action，开始构建DAG，即有向无环图(调用Spark中的算子)
         1. DAG描述多个RDD的转换过程，任务执行时，可以按照DAG的描述，执行真正的计算(数据被操作的一个过程)
         2. DAG是有边界的，有开始(通过SparkContext或者JavaSparkContext创建)，有结束(触发Action，执行run job，一个完整的DAG就形成了)
-        3. 一个Spark Application有多少个DAG，取决于触发了多少次Action，即一个DAG对应一个Job
+        3. 一个Spark Application有多少个DAG，取决于触发了多少次Action，即一个DAG对应一个Job，每个Job之间的Stage划分是独立的
         4. 一个RDD只是描述了数据计算过程中的一个环节，而DAG由一个或多个RDD组成，描述了数据计算过程中的所有环节
         5. 一个DAG可能产生多种不同类型的Task，会有不同的阶段
     2. DAGScheduler将DAG切分Stage，将Stage中生成的Task以**TaskSet**的形式组成**TaskScheduler**(切分的依据是Shuffle)
@@ -462,3 +462,19 @@
     4. SparkSQL中的join操作是会产生大量shuffle的，最好避免join操作，**推荐使用广播变量+自定义函数的方式进行对数据的聚合**，这样会减少shuffle提高效率
     5. Spark SQL中所产生的DataFrame和Dataset都是基于RDD的，DataFrame里面存放了结构化数据的描述信息，DataFrame有表头(表的描述信息)，描述了有多少列，每一列叫什么名字、什么类型和能不能为空即 `RDD+Schema=DataFrame`
     6. DataFrame和Dataset既然都是基于RDD的，那么这两者都是RDD所具有的基本属性，transformation是懒加载的，action触发transformation的执行
+    7. Spark SQL可以读取不同的数据源，包括text,json,csv,parquet格式，也可以保存到不同的数据格式，包括text,json,csv以及parquet
+        1. 在将Dataset结果保存为text格式的时候， `Dataset<Row>` 中的Row的Schema信息不能有多列，如果Schema中有多列的话，写入text文件的时候会报错，保存成text文件时，Schema只能由一列数据信息
+        2. 对于保存为json、csv和parquet格式的文件，都是可以保存为多列的，都是可以记录简单的Schema信息的
+        3. 对于读取parquet格式的文件，Spark SQL可以选择要读取的列，对于不用的列就不用读取了，可以减少数据量的读入，提高效率
+    8. 开窗函数
+        * row_number()函数：就是按照某个字段分组，然后取另一个字段的前几个值，相当于分组取topN
+        * 开窗函数的格式 `row_number() over (partition by xxx order by xxx)`
+    9. 探讨下RDD、DataFrame和Dataset之间的关系
+    10. SparkSQL之join总结
+* Spark内存模型
+    1. Spark 1.6.x的时候通过StaticMemoryManager，数据处理以及类的实体对象都存在JVM Heap中
+        1. JVM Heap的默认值是512M，这取决于 `spark.executor.memory` 参数决定，不论你定义了多大的 `spark.executor.memory` .Spark都必然会定义一个安全空间，在默认情况下只会使用Java Heap上的90%作为安全空间，在单个Executor的角度来看，就是Java Heap * 90%
+        2. 
+        
+    
+        
