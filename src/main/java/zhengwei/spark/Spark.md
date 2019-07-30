@@ -469,7 +469,21 @@
     8. 开窗函数
         * row_number()函数：就是按照某个字段分组，然后取另一个字段的前几个值，相当于分组取topN
         * 开窗函数的格式 `row_number() over (partition by xxx order by xxx)`
-    9. 探讨下RDD、DataFrame和Dataset之间的关系
+    9. RDD、DataFrame和Dataset
+        1. RDD
+            1. RDD时懒执行的不可变的，可以支持lambda表达式的并行"数据集合"
+            2. RDD最大的好处是简单，API易于使用
+            3. RDD的劣势是性能限制，它是一个JVM驻内存对象，这就决定了它存在GC的限制，和数据量增加时Java序列化成本的增加
+        2. DataFrame
+            1. 与RDD类似，DataFrame也是一个分布式数据容器。然而DataFrame更像传统数据库的二维表，除了数据之外，还记录了结构信息，即schema
+            2. 性能要比RDD要高，减少数据读取以及执行计划优化
+            3. 数据以二进制的方式存在于非堆内存中，节省了大量空间外，还摆脱了GC控制
+            4. 在编译器不会进行类型检查，会导致允许出错
+        3. Dataset
+            1. 是DataFrame API的一个扩展，是Spark的最新的数据抽象
+            2. Dataset是强类型的，会进行类型检查，具有和DataFrame一样的查询优化
+            3. Dataset支持编解码器，当需要访问非堆上的数据时可以避免反序列化整个对象，提高了效率。
+            4. Dataframe是Dataset的特列，DataFrame=Dataset[Row] ，所以可以通过as方法将Dataframe转换为Dataset。Row是一个类型，跟Car、Person这些的类型一样，所有的表结构信息我都用Row来表示。
     10. SparkSQL之join总结
 * Spark内存模型
     1. Spark 1.6.x的时候通过StaticMemoryManager，数据处理以及类的实体对象都存在JVM Heap中
