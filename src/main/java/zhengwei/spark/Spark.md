@@ -486,9 +486,99 @@
             4. Dataframe是Dataset的特列，DataFrame=Dataset[Row] ，所以可以通过as方法将Dataframe转换为Dataset。Row是一个类型，跟Car、Person这些的类型一样，所有的表结构信息我都用Row来表示。
     10. SparkSQL之join总结
 * Spark内存模型
-    1. Spark 1.6.x的时候通过StaticMemoryManager，数据处理以及类的实体对象都存在JVM Heap中
-        1. JVM Heap的默认值是512M，这取决于 `spark.executor.memory` 参数决定，不论你定义了多大的 `spark.executor.memory` .Spark都必然会定义一个安全空间，在默认情况下只会使用Java Heap上的90%作为安全空间，在单个Executor的角度来看，就是Java Heap * 90%
-        2. 
-        
-    
-        
+    1. Spark 1.6.x的时候通过**StaticMemoryManager**，数据处理以及类的实体对象都存在JVM Heap中(具体的额JVM内存结构参见JVM.md)
+        1. JVM Heap的默认值是512M，这取决于 `spark.executor.memory` 参数决定，不论你定义了多大的 `spark.executor.memory` .Spark都必然会定义一个安全空间，在默认情况下只会使用Java Heap上的90%作为安全空间，在单个Executor的角度来看，就是 `Java Heap * 90%`
+            * 场景一：假设在一个Executor，它可用的大小是10G，实际上Spark只能使用90%，这个安全空间的比例是由 `spark.storage.safetyFaction` 来控制的(如果内存非常大的话，可以考虑把这个比例调整为95%)，
+            **在安全空间中也会被划分为三个不同的空间，一个是storage区，一个是unroll区和一个shuffle区**
+            1. 安全空间(Safe)：计算公式是-> `spark.executor.memory * spark.storage.safetyFraction` 。也就是Heap Size * 90%，在本例中为10G*09%=9G
+            2. 缓存空间(Storage)：计算公式是-> `spark.executor.memory * spark.storage.safetyFraction * spark.storage.memoryFraction` 。也就是 `Heap Size * 90% * 60% -> Head Size * 54%`，在场景一中是10Gx54%=5.4G，一个应用程序能够缓存多少数据由safetyFraction和memoryFraction这两个参数共同决定
+            ```scala
+              /**
+               * Return the total amount of memory available for the storage region, in bytes.
+               * 获得缓存空间的内存
+               */
+              private def getMaxStorageMemory(conf: SparkConf): Long = {
+                val systemMaxMemory = conf.getLong("spark.testing.memory", Runtime.getRuntime.maxMemory)
+                val memoryFraction = conf.getDouble("spark.storage.memoryFraction", 0.6)
+                val safetyFraction = conf.getDouble("spark.storage.safetyFraction", 0.9)
+                (systemMaxMemory * memoryFraction * safetyFraction).toLong
+              }
+            ```
+            3. Unroll空间：计算公式是-> `spark.executor.memory * saprk.sotrage.safetyFraction * spark.storage.memoryFraction * spark.storage.unrollFraction` 也就是 `Heap Size * 90% * 60% * 20% = 1.8G` ，你可以把序列化的数据放入内存中，当你需要使用数据时，需要对数据进行反序列化
+            ```scala
+              // Max number of bytes worth of blocks to evict when unrolling
+              //存储序列化的数据，Spark从此区域取出数据进行反序列化
+              private val maxUnrollMemory: Long = {
+                (maxOnHeapStorageMemory * conf.getDouble("spark.storage.unrollFraction", 0.2)).toLong
+              }
+            ```
+            4. Shuffle空间(Execution空间)：计算公式是-> `spark.executor.memory * spark.shuffle.memoryFraction * spark.shuffle.safetyFraction` 。在shuffle空间中也会有一个默认80%的安全空间比例，所以应该是 `Heap Size * 20% * 80%` ，在本例中是 `10G * 20% * 80% = 1.6G` 这是shuffle的可用内存
+            ```scala
+            /**
+             * Return the totSal amount of memory available for the execution region, in bytes.
+             */
+             private def getMaxExecutionMemory(conf: SparkConf): Long = {
+                val systemMaxMemory = conf.getLong("spark.testing.memory", Runtime.getRuntime.maxMemory)
+            
+                if (systemMaxMemory < MIN_MEMORY_BYTES) {
+                  throw new IllegalArgumentException(s"System memory $systemMaxMemory must " +
+                    s"be at least $MIN_MEMORY_BYTES. Please increase heap size using the --driver-memory " +
+                    s"option or spark.driver.memory in Spark configuration.")
+                }
+                if (conf.contains("spark.executor.memory")) {
+                  val executorMemory = conf.getSizeAsBytes("spark.executor.memory")
+                  if (executorMemory < MIN_MEMORY_BYTES) {
+                    throw new IllegalArgumentException(s"Executor memory $executorMemory must be at least " +
+                      s"$MIN_MEMORY_BYTES. Please increase executor memory using the " +
+                      s"--executor-memory option or spark.executor.memory in Spark configuration.")
+                  }
+                }
+                val memoryFraction = conf.getDouble("spark.shuffle.memoryFraction", 0.2)
+                val safetyFraction = conf.getDouble("spark.shuffle.safetyFraction", 0.8)
+                (systemMaxMemory * memoryFraction * safetyFraction).toLong
+             }
+            ``` 
+        2. Spark2.x的内存模型叫联合内存(Spark Unified Memory)，数据缓存与数据执行之间的内存可以相互移动，这是一种更弹性的方式，数据处理以及类的实例存放在JVM中，Spark2.x中把内存划分成了3块：Reserved Memory,User Memory和Spark Memory
+            1. Reserved Memory：默认是300M，这个数字一般是固定不变的，在系统运行时，Java Heap Size的大小至少为 `Heap Reserved Memory * 1.5` 
+            > e.g. 300M * 1.5 = 450M的JVM配置，一般本地开发需要2G内存
+            ```scala
+              // Set aside a fixed amount of memory for non-storage, non-execution purposes.
+              // This serves a function similar to `spark.memory.fraction`, but guarantees that we reserve
+              // sufficient memory for the system even for small heaps. E.g. if we have a 1GB JVM, then
+              // the memory used for execution and storage will be (1024 - 300) * 0.6 = 434MB by default.
+              private val RESERVED_SYSTEM_MEMORY_BYTES = 300 * 1024 * 1024
+            ```
+            2. User　Memory：写Spark应用程序中产生的临时变量或者是自己维护的一些数据结构也要给予他们一定的存储空间，我们可以把这部分空间认为是我们程序员自己主导内存口空间，叫用户操作空间，占用的空间是 `(Java Heap Size - Reserved Memory) * 25%` ，
+                             25%是默认参数，可以通过参数进行调优，**这样设计的好处是可以让用户操作时需要的空间与系统框架运行时所需要的空间分开。**
+            > 假设Executor的大小有4G，那么在默认情况下User Memory的大小为(4G - 300M) * 25% = 949MB，也就是说一个Stage内部展开后Task的算子在运行时最大占用内存不能超过949MB。
+            > 例如工程师使用 mapPartition 等，一个 Task 内部所有算子使用的数据空间的大小如果大于 949MB 的话，那么就会出现 OOM。
+            > 思考题：有 100个 Executors 每个 4G 大小，现在要处理 100G 的数据，假设这 100G 分配给 100个 Executors，每个 Executor 分配 1G 的数据，这 1G 的数据远远少于 4G Executor 内存的大小，为什么还会出现 OOM 的情况呢？那是因为在你的代码中(e.g.你写的应用程序算子）超过用户空间的限制 (e.g. 949MB)，而不是 RDD 本身的数据超过了限制。
+            3. Spark Memory：系统框架在运行时需要的内存，这部分内存由两部分构成，分别是Storage Memory和Execution Memory。现在Storage和Execution(Shuffle)采用了Unified的方式共同使用了 `(Java Heap Size -300M) * 75%` ，默认情况下Storage和Execution各占50%，但是Storage和Execution的空间是可以互相移动的
+            > 定义：所谓 Unified 的意思是 Storgae 和 Execution 在适当时候可以借用彼此的 Memory，需要注意的是，当 Execution 空间不足而且 Storage 空间也不足的情况下，
+            > Storage 空间如果曾经使用了超过 Unified 默认的 50% 空间的话则超过部份会被强制 drop 掉一部份数据来解决 Execution 空间不足的问题 (注意：drop 后数据会不会丢失主要是看你在程序设置的 storage_level 来决定你是 Drop 到那里，可能 Drop 到磁盘上)，这是因为执行(Execution) 比缓存 (Storage) 是更重要的事情。
+            ```scala
+              private def getMaxMemory(conf: SparkConf): Long = {
+                val systemMemory = conf.getLong("spark.testing.memory", Runtime.getRuntime.maxMemory)
+                val reservedMemory = conf.getLong("spark.testing.reservedMemory",
+                  if (conf.contains("spark.testing")) 0 else RESERVED_SYSTEM_MEMORY_BYTES)
+                val minSystemMemory = (reservedMemory * 1.5).ceil.toLong
+                if (systemMemory < minSystemMemory) {
+                  throw new IllegalArgumentException(s"System memory $systemMemory must " +
+                    s"be at least $minSystemMemory. Please increase heap size using the --driver-memory " +
+                    s"option or spark.driver.memory in Spark configuration.")
+                }
+                // SPARK-12759 Check executor memory to fail fast if memory is insufficient
+                if (conf.contains("spark.executor.memory")) {
+                  val executorMemory = conf.getSizeAsBytes("spark.executor.memory")
+                  if (executorMemory < minSystemMemory) {
+                    throw new IllegalArgumentException(s"Executor memory $executorMemory must be at least " +
+                      s"$minSystemMemory. Please increase executor memory using the " +
+                      s"--executor-memory option or spark.executor.memory in Spark configuration.")
+                  }
+                }
+                val usableMemory = systemMemory - reservedMemory
+                val memoryFraction = conf.getDouble("spark.memory.fraction", 0.6)
+                (usableMemory * memoryFraction).toLong
+              }
+            ```
+           SparkMemory空间默认是占可用 HeapSize 的 60%，与上图显示的75％有点不同，当然这个参数是可配置的！！
