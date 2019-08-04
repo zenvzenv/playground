@@ -581,4 +581,20 @@
                 (usableMemory * memoryFraction).toLong
               }
             ```
-           SparkMemory空间默认是占可用 HeapSize 的 60%，与上图显示的75％有点不同，当然这个参数是可配置的！！
+           **SparkMemory空间默认是占可用 HeapSize 的 60%，与上图显示的75％有点不同，当然这个参数是可配置的！！**
+10. Spark Streaming
+    1. kafka：分布式消息队列。具有高性能、持久化、多副本备份和横向扩展能力
+        1. kafka特性
+            * 高吞吐、低延迟：kafka每秒可以处理几十万数据，每条消息的延迟只有几毫秒，每个topic可以分成多个partition，consumer group进行consumer操作
+            * 可扩展性：kafka集群支持热扩展，支持横向扩展
+            * 持久性、可靠性：消息被持久化到本地磁盘，并且支持数据备份防止数据丢失
+            * 容错性：允许集群中的节点失效(若副本数量为n，最多容忍n-1个节点失效)
+            * 高并发：支持数千个客户端同时读写
+        2. kafka设计思想
+            1. kafka broker leader选举：kafka broker leader集群受zookeeper管理，
+            2. consumer group：各个consumer(consumer线程)可以组成一个组(consumer group)，partition中的每个message只能被consumer group中的consumer(consumer线程)消费，如果一个message可以被多个consumer消费的话，那么这些consumer必须在不同的组。kafak不支持一个partition中的message由两个或两个以上的在同一个consumer group下的consumer thread来处理，除非在启动一个新的consumer group。所以想要对同一个topic做消费的话，启动多个consumer group就行了，但是要注意的是，这里的多个consumer的消费必须是顺序读取partition中的message，新启动的consumer默认从partition队列的最开始进行读取message，
+        1. topic & partition：生产者往topic中写入数据，消费者从topic中读取数据，为了做到水平扩展，一个topic实际是由多个partition组成的，遇到瓶颈时可以通过增加partition的数量来进行横向扩容，**单个partition确保消息有序**，topic相当于传统消息系统MQ中的一个队列queue，
+        2. partition：
+        3. 
+    2. Spark Streaming
+        1. 
