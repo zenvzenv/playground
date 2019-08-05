@@ -592,7 +592,63 @@
             * 高并发：支持数千个客户端同时读写
         2. kafka设计思想
             1. kafka broker leader选举：kafka broker leader集群受zookeeper管理，
-            2. consumer group：各个consumer(consumer线程)可以组成一个组(consumer group)，partition中的每个message只能被consumer group中的consumer(consumer线程)消费，如果一个message可以被多个consumer消费的话，那么这些consumer必须在不同的组。kafak不支持一个partition中的message由两个或两个以上的在同一个consumer group下的consumer thread来处理，除非在启动一个新的consumer group。所以想要对同一个topic做消费的话，启动多个consumer group就行了，但是要注意的是，这里的多个consumer的消费必须是顺序读取partition中的message，新启动的consumer默认从partition队列的最开始进行读取message，
+            2. consumer group：各个consumer(consumer线程)可以组成一个组(consumer group)，partition中的每个message只能被consumer group中的consumer(consumer线程)消费，如果一个message可以被多个consumer消费的话，那么这些consumer必须在不同的组。kafak不支持一个partition中的message由两个或两个以上的在同一个consumer group下的consumer thread来处理，除非在启动一个新的consumer group。**所以想要对同一个topic做消费的话，启动多个consumer group就行了，但是要注意的是，这里的多个consumer的消费必须是顺序读取partition中的message，新启动的consumer默认从partition队列的最开始进行读取message，同一个partition中的一条message只能被同一个consumer group中的一个consumer消费，不能够同一个consumer group的多个consumer同时消费一个partition。**一个consumer group中无论有多少个consumer，这consumer group一定会去把这个topic下的所有partition全部消费，如果consumer比partition多的话，那么会有consumer会在空闲状态；如果consumer的数量比partition少的话，就会出现一个consumer消费多个partition的情况，最好的情况是指定和partition数量一样的consumer的数量，这样的效率最高，一个consumer消费一个partition。我们在设定consumer group的时候，只需指明consumer group中有几个consumer即可，无需指定对应的消费partition序号，consumer会自动进行rebalance
+            3. consumer rebalance的触发条件
+                1. consumer增加或删除会触发consumer group
+                2. broker的增加或减少也会触发consumer rebalance
+            4. consumer：consumer处理partition中的message。顺序读取。所以必须维护着上一次读到哪里的offset信息。high level api将offset保存在zookeeper中，low level api将offset由自己维护
+            5. Delivery Mode：Kafka producer 发送message不用维护message的offste信息，因为这个时候，offsite就相当于一个自增id，producer就尽管发送message就好了。
+            6. Topic & Partition：Topic相当于传统消息系统MQ中的一个队列queue，producer端发送的message必须指定是发送到哪个topic，但是不需要指定topic下的哪个partition，因为kafka会把收到的message进行load balance，均匀的分布在这个topic下的不同的partition上(hash(message) % [broker数量])。物理上存储上，这个topic会分成一个或多个partition，每个partiton相当于是一个子queue。在物理结构上，每个partition对应一个物理的目录（文件夹），文件夹命名是[topicname]_[partition]_[序号]，一个topic可以有无数多的partition，根据业务需求和数据量来设置。在kafka配置文件中可随时更高num.partitions参数来配置更改topic的partition数量，在创建Topic时通过参数指定parittion数量。Topic创建之后通过Kafka提供的工具也可以修改partiton数量。
+                1. 一个Topic的Partition数量大于等于Broker的数量，可以提高吞吐率。
+                2. 同一个Partition的Replica尽量分散到不同的机器，高可用。
+            7. 当add a new partition的时候：partition里面的message不会重新进行分配，原来的partition里面的message数据不会变，新加的这个partition刚开始是空的，随后进入这个topic的message就会重新参与所有partition的load balance
+            8. Partition Replica：每个partition可以在其他的kafka broker节点上存副本，以便某个kafka broker节点宕机不会影响这个kafka集群。存replica副本的方式是按照kafka broker的顺序存。例如有5个kafka broker节点，某个topic有3个partition，每个partition存2个副本，那么partition1存broker1,broker2，partition2存broker2,broker3。。。以此类推**(replica副本数目不能大于kafka broker节点的数目，否则报错。这里的replica数其实就是partition的副本总数，其中包括一个leader，其他的就是copy副本)**。这样如果某个broker宕机，其实整个kafka内数据依然是完整的。但是，replica副本数越高，系统虽然越稳定，但是回来带资源和性能上的下降；replica副本少的话，也会造成系统丢数据的风险。
+                1. 怎样传送消息：producer先把message发送到partition leader，再由leader发送给其他partition follower。（如果让producer发送给每个replica那就太慢了）
+                2. 在向Producer发送ACK前需要保证有多少个Replica已经收到该消息：根据ack配的个数而定
+                3. 怎样处理某个Replica不工作的情况：如果这个部工作的partition replica不在ack列表中，就是producer在发送消息到partition leader上，partition leader向partition follower发送message没有响应而已，这个不会影响整个系统，也不会有什么问题。如果这个不工作的partition replica在ack列表中的话，producer发送的message的时候会等待这个不工作的partition replca写message成功，但是会等到time out，然后返回失败因为某个ack列表中的partition replica没有响应，此时kafka会自动的把这个部工作的partition replica从ack列表中移除，以后的producer发送message的时候就不会有这个ack列表下的这个部工作的partition replica了。
+                4. 怎样处理Failed Replica恢复回来的情况：如果这个partition replica之前不在ack列表中，那么启动后重新受Zookeeper管理即可，之后producer发送message的时候，partition leader会继续发送message到这个partition follower上。如果这个partition replica之前在ack列表中，此时重启后，需要把这个partition replica再手动加到ack列表中。（ack列表是手动添加的，出现某个部工作的partition replica的时候自动从ack列表中移除的）
+            9.  Partition leader与follower：partition也有leader和follower之分。leader是主partition，producer写kafka的时候先写partition leader，再由partition leader push给其他的partition follower。partition leader与follower的信息受Zookeeper控制，一旦partition leader所在的broker节点宕机，zookeeper会冲其他的broker的partition follower上选择follower变为parition leader。**注意：broker是没有主从之分的，每个broker的地位是平等的**
+            10. Topic分配partition和partition replica的算法
+                1. 将Broker(size=n)和待分配的Partition排序。
+                2. 将第i个Partition分配到第（i%n）个Broker上。
+                3. 将第i个Partition的第j个Replica分配到第((i + j) % n)个Broker上
+            11. 消息投递可靠性
+                1. 啥都不管，发送出去就当作成功，这种情况当然不能保证消息成功投递到broker；
+                2. Master-Slave模型，只有当Master和所有Slave都接收到消息时，才算投递成功，这种模型提供了最高的投递可靠性，但是损伤了性能；
+                3. 只要Master确认收到消息就算投递成功；实际使用时，根据应用特性选择，绝大多数情况下都会中和可靠性和性能选择第三种模型
+            12. 消息在broker上的可靠性：因为消息会持久化到磁盘上，所以如果正常stop一个broker，其上的数据不会丢失；但是如果不正常stop，可能会使存在页面缓存来不及写入磁盘的消息丢失，这可以通过配置flush页面缓存的周期、阈值缓解，但是同样会频繁的写磁盘会影响性能，又是一个选择题，根据实际情况配置。
+            13. 消息消费可靠性：Kafka提供的是“At least once”模型，因为消息的读取进度由offset提供，offset可以由消费者自己维护也可以维护在zookeeper里，但是当消息消费后consumer挂掉，offset没有即时写回，就有可能发生重复读的情况，这种情况同样可以通过调整commit offset周期、阈值缓解，甚至消费者自己把消费和commit offset做成一个事务解决，但是如果你的应用不在乎重复消费，那就干脆不要解决，以换取最大的性能。
+            14. Partition ack
+                1. 当ack=1，表示producer写partition leader成功后，broker就返回成功，无论其他的partition follower是否写成功。
+                2. 当ack=2，表示producer写partition leader和其他一个follower成功的时候，broker就返回成功，无论其他的partition follower是否写成功。
+                3. 当ack=-1[parition的数量]的时候，表示只有producer全部写成功的时候，才算成功，kafka broker才返回成功信息。<br/>
+                **这里需要注意的是，如果ack=1的时候，一旦有个broker宕机导致partition的follower和leader切换，会导致丢数据。**
+            15. message状态：在Kafka中，消息的状态被保存在consumer中，broker不会关心哪个消息被消费了被谁消费了，只记录一个offset值（指向partition中下一个要被消费的消息位置），这就意味着如果consumer处理不好的话，broker上的一个消息可能会被消费多次
+            16. message持久化：Kafka中会把消息持久化到本地文件系统中，并且保持O(1)极高的效率。由于message的写入持久化是顺序写入的，因此message在被消费的时候也是按顺序被消费的，保证partition的message是顺序消费的。
+            17. message有效期：Kafka会长久保留其中的消息，以便consumer可以多次消费，当然其中很多细节是可配置的。
+            18. Produer：Producer向Topic发送message，不需要指定partition，直接发送就好了。kafka通过partition ack来控制是否发送成功并把信息返回给producer，producer可以有任意多的thread，这些kafka服务器端是不care的。Producer端的delivery guarantee默认是At least once的。也可以设置Producer异步发送实现At most once。Producer可以用主键幂等性实现Exactly once
+            19. Kafka高吞吐量：Kafka的高吞吐量体现在读写上，分布式并发的读和写都非常快，写的性能体现在以o(1)的时间复杂度进行顺序写入。读的性能体现在以o(1)的时间复杂度进行顺序读取， 对topic进行partition分区，consume group中的consume线程可以以很高能性能进行顺序读。
+            20. Kafka delivery guarantee(message传送保证)：（1）At most once消息可能会丢，绝对不会重复传输；（2）At least once 消息绝对不会丢，但是可能会重复传输；（3）Exactly once每条信息肯定会被传输一次且仅传输一次，这是用户想要的。
+            21. 批量发送：Kafka支持以消息集合为单位进行批量发送，以提高push效率。
+            22. push-and-pull : Kafka中的Producer和consumer采用的是push-and-pull模式，即Producer只管向broker push消息，consumer只管从broker pull消息，两者对消息的生产和消费是异步的。
+            23. Kafka集群中broker之间的关系：不是主从关系，各个broker在集群中地位一样，我们可以随意的增加或删除任何一个broker节点。
+            24. 负载均衡方面： Kafka提供了一个 metadata API来管理broker之间的负载（对Kafka0.8.x而言，对于0.7.x主要靠zookeeper来实现负载均衡）。
+            25. 同步异步：Producer采用异步push方式，极大提高Kafka系统的吞吐率（可以通过参数控制是采用同步还是异步方式）。
+            26. 分区机制partition：Kafka的broker端支持消息分区partition，Producer可以决定把消息发到哪个partition，在一个partition 中message的顺序就是Producer发送消息的顺序，一个topic中可以有多个partition，具体partition的数量是可配置的。partition的概念使得kafka作为MQ可以横向扩展，吞吐量巨大。partition可以设置replica副本，replica副本存在不同的kafka broker节点上，第一个partition是leader,其他的是follower，message先写到partition leader上，再由partition leader push到parition follower上。所以说kafka可以水平扩展，也就是扩展partition。
+            27. 离线数据装载：Kafka由于对可拓展的数据持久化的支持，它也非常适合向Hadoop或者数据仓库中进行数据装载。
+            28. 实时数据与离线数据：kafka既支持离线数据也支持实时数据，因为kafka的message持久化到文件，并可以设置有效期，因此可以把kafka作为一个高效的存储来使用，可以作为离线数据供后面的分析。当然作为分布式实时消息系统，大多数情况下还是用于实时的数据处理的，但是当cosumer消费能力下降的时候可以通过message的持久化在淤积数据在kafka。
+            29. 插件支持：现在不少活跃的社区已经开发出不少插件来拓展Kafka的功能，如用来配合Storm、Hadoop、flume相关的插件。
+            30. 解耦:  相当于一个MQ，使得Producer和Consumer之间异步的操作，系统之间解耦
+            31. 冗余:  replica有多个副本，保证一个broker node宕机后不会影响整个服务
+            32. 扩展性:  broker节点可以水平扩展，partition也可以水平增加，partition replica也可以水平增加
+            33. 峰值:  在访问量剧增的情况下，kafka水平扩展, 应用仍然需要继续发挥作用
+            34. 可恢复性:  系统的一部分组件失效时，由于有partition的replica副本，不会影响到整个系统。
+            35. 顺序保证性：由于kafka的producer的写message与consumer去读message都是顺序的读写，保证了高效的性能。
+            36. 缓冲：由于producer那面可能业务很简单，而后端consumer业务会很复杂并有数据库的操作，因此肯定是producer会比consumer处理速度快，如果没有kafka，producer直接调用consumer，那么就会造成整个系统的处理速度慢，加一层kafka作为MQ，可以起到缓冲的作用。
+            37. 异步通信：作为MQ，Producer与Consumer异步通信
+        3. Kafka文件存储机制
+            1. kafka部分名词解释如下：
+                1. 
         1. topic & partition：生产者往topic中写入数据，消费者从topic中读取数据，为了做到水平扩展，一个topic实际是由多个partition组成的，遇到瓶颈时可以通过增加partition的数量来进行横向扩容，**单个partition确保消息有序**，topic相当于传统消息系统MQ中的一个队列queue，
         2. partition：
         3. 
