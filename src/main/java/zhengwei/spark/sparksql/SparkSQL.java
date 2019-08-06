@@ -17,10 +17,13 @@ import org.apache.spark.sql.types.StructType;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import scala.Tuple2;
 import scala.Tuple3;
 import scala.Tuple4;
 import zhengwei.common.IpUtil;
 
+import java.net.MalformedURLException;
+import java.net.URL;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -82,13 +85,14 @@ public class SparkSQL {
 	@Test
 	void testCreateDataset() {
 		Dataset<String> personDS = spark.createDataset(Arrays.asList("1,zhengwei1,China", "2,zhengwei2,USA"), Encoders.STRING());
-		Dataset<Tuple3<String, String, String>> personDSMap = personDS.map((MapFunction<String, Tuple3<String, String, String>>) value -> {
+		MapFunction mapFunction=(MapFunction<String,Tuple3<String,String,String>>) value->{
 			String[] fields = value.split("[,]");
 			String id = fields[0];
 			String name = fields[1];
 			String local = fields[2];
 			return new Tuple3<>(id, name, local);
-		}, Encoders.tuple(Encoders.STRING(), Encoders.STRING(), Encoders.STRING()));
+		};
+		Dataset<Tuple3<String, String, String>> personDSMap = personDS.map(mapFunction, Encoders.tuple(Encoders.STRING(), Encoders.STRING(), Encoders.STRING()));
 		Dataset<Row> newPersonDS = personDSMap.toDF("id", "name", "local");
 		newPersonDS.show();
 	}
@@ -99,14 +103,15 @@ public class SparkSQL {
 	@Test
 	void sparkIpLocation() {
 		Dataset<String> lines = spark.read().textFile("src/main/resources/input/prov_operator_info.txt");
-		Dataset<Tuple4<Long, Long, String, String>> provinceOperateInfoDS = lines.map((MapFunction<String, Tuple4<Long, Long, String, String>>) line -> {
+		MapFunction mapFunction=(MapFunction<String, Tuple4<Long, Long, String, String>>) line -> {
 			String[] fields = line.split("[|]");
 			long srcIp = Long.parseLong(fields[0]);
 			long destIp = Long.parseLong(fields[1]);
 			String province = fields[2];
 			String operator = fields[3];
 			return new Tuple4<>(srcIp, destIp, province, operator);
-		}, Encoders.tuple(Encoders.LONG(), Encoders.LONG(), Encoders.STRING(), Encoders.STRING()));
+		};
+		Dataset<Tuple4<Long, Long, String, String>> provinceOperateInfoDS = lines.map(mapFunction, Encoders.tuple(Encoders.LONG(), Encoders.LONG(), Encoders.STRING(), Encoders.STRING()));
 		Dataset<Row> newProvinceOperatorDS = provinceOperateInfoDS.toDF("srcIp", "destIp", "province", "operator");
 		newProvinceOperatorDS.registerTempTable("ipInfo");
 		Dataset<String> logDS = spark.read().textFile("src/main/resources/input/netflow.zw");
@@ -205,6 +210,49 @@ public class SparkSQL {
 		spark.udf().register("gm", geoMean);
 		Dataset<Row> result = spark.sql("select gm(id) result from v_range");
 		result.show();
+	}
+
+	@Test
+	void testSparkSQLFavTeacher() throws AnalysisException {
+		Dataset<String> teacherDS = spark.read().textFile("src/main/resources/input/teacher.log");
+		Dataset<Row> subjectAndTeacherDS = teacherDS.map((MapFunction<String, Tuple2<String, String>>) line -> {
+			int lastIndexOf = line.lastIndexOf("/");
+			String teacher = line.substring(lastIndexOf + 1);
+			String subject = new URL(line).getHost().split("[.]")[0];
+			return new Tuple2<String, String>(subject, teacher);
+		}, Encoders.tuple(Encoders.STRING(), Encoders.STRING())).toDF("subject", "teacher");
+		/*MapFunction mapFunction= (MapFunction<String, Tuple2<String, String>>) line -> {
+			int lastIndexOf = line.lastIndexOf("/");
+			String teacher = line.substring(lastIndexOf + 1);
+			String subject = new URL(line).getHost().split("[.]")[0];
+			return new Tuple2<String, String>(subject, teacher);
+		};
+		teacherDS.map(mapFunction,Encoders.tuple(Encoders.STRING(),Encoders.STRING()));*/
+		/*MapFunction mapFunction= (MapFunction<String, Tuple2<String, String>>) line -> {
+			int lastIndexOf = line.lastIndexOf("/");
+			String teacher = line.substring(lastIndexOf + 1);
+			String subject = new URL(line).getHost().split("[.]")[0];
+			return new Tuple2<>(subject, teacher);
+		};
+		MapFunction mapFunction1=(Object line)->{
+			String s = line.toString();
+			int lastIndexOf = s.lastIndexOf("/");
+			String teacher = s.substring(lastIndexOf + 1);
+			String subject = new URL(s).getHost().split("[.]")[0];
+			return new Tuple2<>(subject, teacher);
+		};
+		Dataset subjectAndTeacherDS = teacherDS.map(mapFunction, Encoders.tuple(Encoders.STRING(), Encoders.STRING())).toDF("subject", "teacher");*/
+		subjectAndTeacherDS.createTempView("v_subject_teacher");
+		Dataset<Row> result1 = spark.sql("SELECT subject, teacher, count(*) counts FROM v_subject_teacher GROUP BY subject, teacher");
+		result1.createTempView("v_temp_subject_teacher_count");
+		Dataset<Row> result2 = spark.sql("SELECT *, row_number() over(order by counts desc) g_rk FROM (SELECT subject, teacher, counts, row_number() over(partition by subject order by counts desc) sub_rk FROM v_temp_subject_teacher_count) temp2 WHERE sub_rk <= 3");
+
+		result2.show();
+	}
+
+	public static void main(String[] args) throws MalformedURLException {
+		String host = new URL("http://javaee.edu360.cn/laoyang").getHost();
+		System.out.println(host);
 	}
 
 	@AfterAll
