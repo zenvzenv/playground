@@ -485,12 +485,31 @@
             3. Dataset支持编解码器，当需要访问非堆上的数据时可以避免反序列化整个对象，提高了效率。
             4. Dataframe是Dataset的特列，DataFrame=Dataset[Row] ，所以可以通过as方法将Dataframe转换为Dataset。Row是一个类型，跟Car、Person这些的类型一样，所有的表结构信息我都用Row来表示。
     10. SparkSQL之join总结
+        1. Shuffle Hash Join
+            * 在数据库常见模型中(例如星型模型或雪花模型)，表一般分为两种：事实表和维度表。维度表一般是固定的，变大较少的表，一般数据有限。而事实表一般记记录流水，通常随时间的增长而不断膨胀
+            * 因为join操作是对两个表中key值相同的记录进行连接，在SparkSQL中，对两个表做join最直接的方式就是先根据key分区，再在每个分区中把key相同的记录拿出来做连接操作，这样就不可避免的会涉及到shuffle
+            * 由于Spark是一个分布式的计算引擎，可以通过分区的形式将大批量的数据划分成n份较小的数据集进行并行计算，这种思想应用到Spark SQL join上便是Shuffle Hash Join，利用key相同必然被分到相同的分区，SparkSQL将较大的表分而治之，先将表划分成n个分区
+            * 在一定大小的表中，SparkSQL从时空结合的角度来看，将两个表进行重新分区，并且对小表中的分区hash化，从而完成join，尽量减少driver和executor的内存压力，提升计算时的性能。
+            * Shuffle Hash Join主要分两步：
+                1. 对两张表按照join keys进行重新分区，即shuffle，目的是为了让具有相同join keys值的记录分到对应的分区中
+                2. 对对应分区中的数据进行join，此处先将小表分区构造成一张hash表，然后根据大表中记录的join keys值拿出来进行匹配
+        2. Broadcast Join
+            * shuffle在spark中是比较耗时的操作，我们应该尽量避免shuffle操作
+            * 当维度表和事实表进行join的时候，为了避免shuffle操作，我们可以将大小有限的维度表的全部数据广播到各个节点上，供事实表去使用，executor存储了全部的维度表数据，会牺牲一定的executor的存储空间，换取避免shuffle操作
+            * Broadcast Join的条件如下
+                1. 被广播的表要小于 `spark.sql.autoBroadcastJoinThreshold` 所配置的值，默认是10M
+                2. 基表不能被广播，比如 `left join` 时，只能广播右表
+                3. 一侧的表要明显小于另一侧表，小的一侧将被广播(明显小于定义的3倍)
+            * 缺点：这个方案只适用于广播较小的表，因为倍广播的表首先要被collect到driver端，然后倍冗余分发到各个executor上，所以当表较大时，采用Broadcast Join这种方式会对driver和executor端造成较大压力，数据的冗余传输会远大于shuffle的开销；另外，频繁的广播，对driver的内存也是一种考验
+        3. Sort Merge Join
+            * 上面两种join方式对于一个大表一个小表的情形比较适用，但当两个表都非常大的时候，显然无论使用哪种方式都对内存造成巨大压力，这是因为两者采用的都是hash join，是将另一侧的数据完全加载到内存中，使用hash code取join keys值相等的记录进行连接
+            * 当两张表都特别大时，Spark SQL采用一种全新的方案，即Sort Merge Join。这种方式不用将一侧数据全部加载后再进行hash join，但需要在join前对数据进行排序，因为两个序列是有序的，从头遍历，遇到相同的key就输出，如果不同，左边小就继续取左边，反之取右边。可以看出无论分区多大，Sort Merge Join都不用把某一侧的数据全部加载到内存中，而是即用即取即丢，从而大大提高了大数据量下sql的join操作。
 * Spark内存模型
     1. Spark 1.6.x的时候通过**StaticMemoryManager**，数据处理以及类的实体对象都存在JVM Heap中(具体的额JVM内存结构参见JVM.md)
         1. JVM Heap的默认值是512M，这取决于 `spark.executor.memory` 参数决定，不论你定义了多大的 `spark.executor.memory` .Spark都必然会定义一个安全空间，在默认情况下只会使用Java Heap上的90%作为安全空间，在单个Executor的角度来看，就是 `Java Heap * 90%`
             * 场景一：假设在一个Executor，它可用的大小是10G，实际上Spark只能使用90%，这个安全空间的比例是由 `spark.storage.safetyFaction` 来控制的(如果内存非常大的话，可以考虑把这个比例调整为95%)，
             **在安全空间中也会被划分为三个不同的空间，一个是storage区，一个是unroll区和一个shuffle区**
-            1. 安全空间(Safe)：计算公式是-> `spark.executor.memory * spark.storage.safetyFraction` 。也就是Heap Size * 90%，在本例中为10G*09%=9G
+            1. 安全空间(Safe)：计算公式是-> `spark.executor.memory * spark.storage.safetyFraction` 。也就是Heap Size * 90%，在本例中为10G * 09%=9G
             2. 缓存空间(Storage)：计算公式是-> `spark.executor.memory * spark.storage.safetyFraction * spark.storage.memoryFraction` 。也就是 `Heap Size * 90% * 60% -> Head Size * 54%`，在场景一中是10Gx54%=5.4G，一个应用程序能够缓存多少数据由safetyFraction和memoryFraction这两个参数共同决定
             ```scala
               /**
@@ -554,7 +573,7 @@
             > 例如工程师使用 mapPartition 等，一个 Task 内部所有算子使用的数据空间的大小如果大于 949MB 的话，那么就会出现 OOM。
             > 思考题：有 100个 Executors 每个 4G 大小，现在要处理 100G 的数据，假设这 100G 分配给 100个 Executors，每个 Executor 分配 1G 的数据，这 1G 的数据远远少于 4G Executor 内存的大小，为什么还会出现 OOM 的情况呢？那是因为在你的代码中(e.g.你写的应用程序算子）超过用户空间的限制 (e.g. 949MB)，而不是 RDD 本身的数据超过了限制。
             3. Spark Memory：系统框架在运行时需要的内存，这部分内存由两部分构成，分别是Storage Memory和Execution Memory。现在Storage和Execution(Shuffle)采用了Unified的方式共同使用了 `(Java Heap Size -300M) * 75%` ，默认情况下Storage和Execution各占50%，但是Storage和Execution的空间是可以互相移动的
-            > 定义：所谓 Unified 的意思是 Storgae 和 Execution 在适当时候可以借用彼此的 Memory，需要注意的是，当 Execution 空间不足而且 Storage 空间也不足的情况下，
+            > 定义：所谓 Unified 的意思是 Storage 和 Execution 在适当时候可以借用彼此的 Memory，需要注意的是，当 Execution 空间不足而且 Storage 空间也不足的情况下，
             > Storage 空间如果曾经使用了超过 Unified 默认的 50% 空间的话则超过部份会被强制 drop 掉一部份数据来解决 Execution 空间不足的问题 (注意：drop 后数据会不会丢失主要是看你在程序设置的 storage_level 来决定你是 Drop 到那里，可能 Drop 到磁盘上)，这是因为执行(Execution) 比缓存 (Storage) 是更重要的事情。
             ```scala
               private def getMaxMemory(conf: SparkConf): Long = {
