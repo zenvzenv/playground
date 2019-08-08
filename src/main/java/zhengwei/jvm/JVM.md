@@ -731,10 +731,95 @@
                 * 方法返回值逃逸
                 * 实例引用发生逃逸
                 * 线程逃逸:赋值给类变量或可以在其他线程中访问的实例变量.
+                ```java
+                public class EscapeAnalysis {
+                	/**
+                	 * -Xmx4G -Xms4G -XX:-DoEscapeAnalysis -XX:+PrintGCDetails -XX:+HeapDumpOnOutOfMemoryError
+                	 * 1000000个user对象全部在堆中分配
+                	 *
+                	 * -Xmx4G -Xms4G -XX:+DoEscapeAnalysis -XX:+PrintGCDetails -XX:+HeapDumpOnOutOfMemoryError
+                	 * 84536个user对象在堆上分配，其余对象将在栈上分配，创建1000000个对象的速度也比在对上创建的速度要快
+                	 */
+                	public static void main(String[] args) {
+                		long a1 = System.currentTimeMillis();
+                		for (int i = 0; i < 1000000; i++) {
+                			alloc();
+                		}
+                		// 查看执行时间
+                		long a2 = System.currentTimeMillis();
+                		System.out.println("cost " + (a2 - a1) + " ms");
+                		// 为了方便查看堆内存中对象个数，线程sleep
+                		try {
+                			Thread.sleep(100000);
+                		} catch (InterruptedException e1) {
+                			e1.printStackTrace();
+                		}
+                	}
+                	private static void alloc() {
+                		User user = new User();
+                	}
+                
+                	private static class User {
+                
+                	}
+                }
+                ```
             * 栈上分配：将不会逃逸的局部对象分配到栈上，那对象就会随着方法的结束而自动销毁，减少垃圾收集系统的压力。
                 * 通过 `-XX:-/+DoEscapeAnalysis` 关闭/开启逃逸分析
                 * 我们通过JVM内存分配可以知道JAVA中的对象都是在堆上进行分配，当对象没有被引用的时候，需要依靠GC进行回收内存，如果对象数量较多的时候，会给GC带来较大压力，也间接影响了应用的性能。为了减少临时对象在堆内分配的数量，JVM通过逃逸分析确定该对象不会被外部访问。那就通过标量替换将该对象分解在栈上分配内存，这样该对象所占用的内存空间就可以随栈帧出栈而销毁，就减轻了垃圾回收的压力。
+                ```java
+                public class EscapeAnalysis {
+                	/**
+                	 * -Xmx4G -Xms4G -XX:-DoEscapeAnalysis -XX:+PrintGCDetails -XX:+HeapDumpOnOutOfMemoryError
+                	 * 1000000个user对象全部在堆中分配
+                	 *
+                	 * -Xmx4G -Xms4G -XX:+DoEscapeAnalysis -XX:+PrintGCDetails -XX:+HeapDumpOnOutOfMemoryError
+                	 * 84536个user对象在堆上分配，其余对象将在栈上分配，创建1000000个对象的速度也比在对上创建的速度要快
+                	 */
+                	public static void main(String[] args) {
+                		long a1 = System.currentTimeMillis();
+                		for (int i = 0; i < 1000000; i++) {
+                			alloc();
+                		}
+                		// 查看执行时间
+                		long a2 = System.currentTimeMillis();
+                		System.out.println("cost " + (a2 - a1) + " ms");
+                		// 为了方便查看堆内存中对象个数，线程sleep
+                		try {
+                			Thread.sleep(100000);
+                		} catch (InterruptedException e1) {
+                			e1.printStackTrace();
+                		}
+                	}
+                	private static void alloc() {
+                		User user = new User();
+                	}
+                
+                	private static class User {
+                
+                	}
+                }
+                ```
             * 同步消除：如果该变量不会发生线程逃逸，也就是无法被其他线程访问，那么对这个变量的读写就不存在竞争，可以将同步措施消除掉（同步是需要付出代价的），如果你定义的类的方法上有同步锁，但在运行时，却只有一个线程在访问，此时逃逸分析后的机器码，会去掉同步锁运行，这就是没有出现线程逃逸的情况。那该对象的读写就不会存在资源的竞争，不存在资源的竞争，则可以消除对该对象的同步锁。
                 * 通过 `-XX:+EliminateLocks` 可以开启同步消除,进行测试执行的效率
+                ```java
+                 public String createString(String ... values){
+                     StringBuffer stringBuffer = new StringBuffer(); 
+                     for (String string : values) {
+                         stringBuffer.append(string+" ");
+                    }
+                     return stringBuffer.toString();
+                 }   
+                public static void main(String[] args) {
+                    long start = System.currentTimeMillis();
+                    EscapeAnalysis escapeAnalysis = new EscapeAnalysis();
+                    for (int i = 0; i < 1000000; i++) {
+                        escapeAnalysis.createString("Escape", "Hello");
+                    }
+                    long bufferCost = System.currentTimeMillis() - start;
+                    System.out.println("craeteString: " + bufferCost + " ms");
+                }
+                ```
             * 标量替换：标量是指无法在分解的数据类型，比如原始数据类型以及reference类型。而聚合量就是可继续分解的，比如 Java 中的对象。标量替换如果一个对象不会被外部访问，并且对象可以被拆散的话，真正执行时可能不创建这个对象，而是直接创建它的若干个被这个方法使用到的成员变量来代替。这种方式不仅可以让对象的成员变量在栈上分配和读写，还可以为后后续进一步的优化手段创建条件。
                 * 通过 `-XX:+EliminateAllocations` 可以开启标量替换， `-XX:+PrintEliminateAllocations` 查看标量替换情况（Server VM 非Product版本支持）
+                
