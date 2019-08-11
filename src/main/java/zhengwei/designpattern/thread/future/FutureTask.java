@@ -1,4 +1,4 @@
-package zhengwei.designpattern.future;
+package zhengwei.designpattern.thread.future;
 
 /**
  * 封装代码逻辑

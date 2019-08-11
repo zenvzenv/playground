@@ -1,4 +1,4 @@
-package zhengwei.designpattern.guardedsuspension;
+package zhengwei.designpattern.thread.guardedsuspension;
 
 /**
  * @author zhengwei AKA Awei

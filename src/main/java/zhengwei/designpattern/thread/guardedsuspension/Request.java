@@ -1,4 +1,4 @@
-package zhengwei.designpattern.guardedsuspension;
+package zhengwei.designpattern.thread.guardedsuspension;
 
 /**
  * 当我们的处理能力满了或者暂时无法处理新的请求时，就把新的请求挂起，过一会再去处理它
