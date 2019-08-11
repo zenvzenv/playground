@@ -1,4 +1,4 @@
-package zhengwei.designpattern.consumerproductor;
+package zhengwei.designpattern.thread.consumerproductor;
 
 /**
  * @author zhengwei AKA Awei

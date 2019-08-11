@@ -1,4 +1,4 @@
-package zhengwei.designpattern.threadcontext;
+package zhengwei.designpattern.thread.threadcontext;
 
 import lombok.Data;
 

@@ -1,4 +1,4 @@
-package zhengwei.designpattern.future;
+package zhengwei.designpattern.thread.future;
 
 /**
  * 获取未来结果的一个凭证，凭Future去获取最终结果

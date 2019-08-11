@@ -1,4 +1,4 @@
-package zhengwei.designpattern.future;
+package zhengwei.designpattern.thread.future;
 
 /**
  * 同步调用

@@ -1,4 +1,4 @@
-package zhengwei.designpattern.consumerproductor;
+package zhengwei.designpattern.thread.consumerproductor;
 
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
