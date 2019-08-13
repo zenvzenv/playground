@@ -1,5 +1,7 @@
 package zhengwei.algorithm.queue;
 
+import java.util.Scanner;
+
 /**
  * 循环队列
  *
@@ -41,21 +43,26 @@ public class CircularArrayQueue<E> implements Queue<E> {
 	public E get() throws RuntimeException {
 		if (isEmpty()) {
 			throw new IndexOutOfBoundsException("队列为空");
+//			System.out.println("队列为空");
 		}
 		//front指向的就是队列的头部元素，获取队列元素的话就直接获取front指向的元素即可
 		E value = queue[front];
 		//front不能无限制的向上递增，需要取模，front+1
 		front = (front + 1) % maxSize;
+		System.out.println(front);
 		return value;
 	}
 
 	@Override
 	public void add(E e) {
 		if (isFull()) {
-			throw new IndexOutOfBoundsException("队列已满");
+//			throw new IndexOutOfBoundsException("队列已满");
+			System.out.println("队列已满");
+			return;
 		}
 		queue[rear] = e;
 		rear = (rear + 1) % maxSize;
+		System.out.println(rear);
 	}
 
 	@Override
@@ -80,5 +87,39 @@ public class CircularArrayQueue<E> implements Queue<E> {
 	 */
 	private int size() {
 		return (rear + maxSize - front) % maxSize;
+	}
+	public static void main(String[] args) {
+		Queue<Integer> queue = new CircularArrayQueue<>(4);
+		char key = ' ';
+		Scanner scanner = new Scanner(System.in);
+		boolean loop = true;
+		while (loop) {
+			key=scanner.next().charAt(0);
+			switch (key) {
+				case 's':
+					queue.show();
+					break;
+				case 'a':
+					System.out.println("输入一个数：");
+					int v = scanner.nextInt();
+					queue.add(v);
+					break;
+				case 'g':
+					try {
+						System.out.println(queue.get());
+					} catch (Exception e) {
+						e.printStackTrace();
+					}
+					break;
+				case 'h':
+					System.out.println(queue.head());
+					break;
+				case 'e':
+					loop = false;
+					break;
+				default:
+					break;
+			}
+		}
 	}
 }
