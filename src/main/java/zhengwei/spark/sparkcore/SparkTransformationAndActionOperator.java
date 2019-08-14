@@ -161,13 +161,18 @@ public class SparkTransformationAndActionOperator {
 	@Test
 	void testCache(){
 		//把RDD缓存到内存中，以分区为单位进行缓存
+		/*jsc.setCheckpointDir("e:/temp/");
 		JavaRDD<String> cache = rdd1.cache();
 		//把缓存的数据抹去，即取消缓存数据
 		JavaRDD<String> unpersist = cache.unpersist();
 		//设置checkpoint的缓存目录(需要分布式文件系统，高可靠性)，以后缓存的数据将会存放在该hdfs的目录上
-		jsc.setCheckpointDir("hdfs://ns:9000/checkpoint");
 		//设置检查点checkpoint
 		cache.checkpoint();
+		cache.collect();*/
+		//从可靠的文件系统中读取检查点数据
+		final JavaRDD<Object> checkpointFileRDD = jsc.checkpointFile("e:/temp/b3251938-3644-4248-80b1-75661334e3db/rdd-0");
+		checkpointFileRDD.checkpoint();
+		System.out.println(checkpointFileRDD.collect().toString());
 	}
 	@AfterAll
 	static void end(){
