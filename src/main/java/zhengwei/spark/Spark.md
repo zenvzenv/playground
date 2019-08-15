@@ -183,9 +183,108 @@
         }
       }
     ```
-   2. 宽窄依赖具体参见[宽依赖和窄依赖]
+   2. 宽窄依赖具体参见#宽依赖和窄依赖
 4. compute(计算)
+    1. 当调用org.apache.spark.rdd.RDD.iterator方法无法从缓存或checkpoint中获取指定partition的迭代器时，就会调用compute去计算获取
+    2. 每个RDD都会实现compute方法，compute都会和迭代器(RDD之间转换的迭代器)进行复合，这样就不需要保存compute每次计算的结果
+    ```scala
+      /**
+       * Implemented by subclasses to compute a given partition.
+       * 由子类去实现，去计算给定的分区的数据
+       * 分区中split: Partition装的就是实际需要计算的数据
+       */
+      @DeveloperApi
+      def compute(split: Partition, context: TaskContext): Iterator[T]
+    ```
+   3. 举例
+        1. map
+        ```scala
+        private var dependencies_ : Seq[Dependency[_]] = _
+        /**
+         * Get the list of dependencies of this RDD, taking into account whether the
+         * RDD is checkpointed or not.
+         */
+        final def dependencies: Seq[Dependency[_]] = {
+            checkpointRDD.map(r => List(new OneToOneDependency(r))).getOrElse {
+              if (dependencies_ == null) {
+                dependencies_ = getDependencies
+              }
+              dependencies_
+            }
+        }
+        /** Returns the first parent RDD */
+        protected[spark] def firstParent[U: ClassTag]: RDD[U] = {
+          //返回dependencies_中的第一个依赖的RDD
+          dependencies.head.rdd.asInstanceOf[RDD[U]]
+        }
+        private[spark] class MapPartitionsRDD[U: ClassTag, T: ClassTag](
+            var prev: RDD[T],
+            f: (TaskContext, Int, Iterator[T]) => Iterator[U],  // (TaskContext, partition index, iterator)
+            preservesPartitioning: Boolean = false,
+            isFromBarrier: Boolean = false,
+            isOrderSensitive: Boolean = false)
+          extends RDD[U](prev) {
+          override val partitioner = if (preservesPartitioning) firstParent[T].partitioner else None
+          override def getPartitions: Array[Partition] = firstParent[T].partitions
+          //f->是我们自定义的算子函数
+          //split: Partition->split中会存放我们需要计算的真正的数据
+          //firstParent->是指本RDD依赖的private var dependencies_ : Seq[Dependency[_]] = _中的第一个
+          override def compute(split: Partition, context: TaskContext): Iterator[U] =
+            f(context, split.index, firstParent[T].iterator(split, context))
+        
+          override def clearDependencies() {
+            super.clearDependencies()
+            prev = null
+          }
+        
+          @transient protected lazy override val isBarrier_ : Boolean =
+            isFromBarrier || dependencies.exists(_.rdd.isBarrier())
+        
+          override protected def getOutputDeterministicLevel = {
+            if (isOrderSensitive && prev.outputDeterministicLevel == DeterministicLevel.UNORDERED) {
+              DeterministicLevel.INDETERMINATE
+            } else {
+              super.getOutputDeterministicLevel
+            }
+          }
+        }
+        ```
+      2. groupByKey：与map、union不同，groupByKey产生的是宽依赖(ShuffleDependency)的transformation，其最终生成的是 `org.apache.spark.rdd.ShuffledRDD` ，来看看其最终实现：
+      ```scala
+        override def compute(split: Partition, context: TaskContext): Iterator[(K, C)] = {
+          val dep = dependencies.head.asInstanceOf[ShuffleDependency[K, V, C]]
+          //ShuffledRDD的compute使用shuffleManager来获取一个reader，该reader将从本地或远程拉取map outer的file数据
+          SparkEnv.get.shuffleManager.getReader(dep.shuffleHandle, split.index, split.index + 1, context)
+            .read()
+            .asInstanceOf[Iterator[(K, C)]]
+        }  
+      ```
+      
 5. preferLocations(优先分配节点列表)
+    1. 对于分区而言，返回数据本地化的计算列表，也就是说，每个RDD会持有一个列表(Seq)，而这个列表保存着分片有限分配给哪个worker节点计算，spark遵循着计算向数据靠拢的原则，也就是尽量在存有数据的节点上进行计算。
+    2. 要注意，并不是每个RDD都会有prefer locations，比如从Java或Scala集合中创建的RDD就没有，从HDFS中读取文件生成的RDD就有prefer location
+    ```scala
+      /**
+       * Get the preferred locations of a partition, taking into account whether the
+       * RDD is checkpointed.
+       * 获取分区的首先位置，同时考虑RDD是否为检查点
+       */
+      final def preferredLocations(split: Partition): Seq[String] = {
+        checkpointRDD.map(_.getPreferredLocations(split)).getOrElse {
+          getPreferredLocations(split)
+        }
+      }
+    ```
+## Spark天堂之门--SparkContext
+1. SparkContext会伴随着整个Spark程序的生命周期，SparkContext是Spark程序通往集群的的唯一通道，是程序的起点也是程序的终点，SparkContext会创建三大核心对象TaskSchedulerImpl,DAGScheduler和SchedulerBackend。
+2. 什么是Spark的天堂之门
+    1. Spark程序在运行时分为Driver和Executor两部分
+    2. Spark编程是基于SparkContext的
+        1. Spark的核心基础是RDD，整个程序的第一个RDD是由SparkContext来创建的，
+        2. Spark的程序调度优化也是基于SparkContext的，首先进行调度优化
+    3. Spark程序的注册是通过SparkContext实例化时产生的对象来完成的(其实是SchedulerBackend来完成的)
+    4. Spark程序在运行时，需要通过ClusterManager获取具体的计算资源，计算资源也是通过SparkContext所产生的对象来申请的(其实时SchedulerBackend来获取计算资源的)
+    5. SparkContext崩溃或结束的时候整个Spark程序也就结束了
 ## 算子
 预先输出的RDD，注意RDD中是不存数据的，只存运算的逻辑，RDD生成的Task来执行真正的计算
 ```java
@@ -731,6 +830,16 @@
         }
       }
     }
+  }
+```
+5. 检查点会切断此RDD的检查点之前的所有Lineage和迭代关系，所以在 `org.apache.spark.rdd.ReliableCheckpointRDD` 中的compute方法只会返回对应HDFS的文件反序列化流的一个迭代器即可。
+```scala
+  /**
+   * Read the content of the checkpoint file associated with the given partition.
+   */
+  override def compute(split: Partition, context: TaskContext): Iterator[T] = {
+    val file = new Path(checkpointPath, ReliableCheckpointRDD.checkpointFileName(split.index))
+    ReliableCheckpointRDD.readCheckpointFile(file, broadcastedConf, context)
   }
 ```
 ## Spark运行过程(Standalone)
