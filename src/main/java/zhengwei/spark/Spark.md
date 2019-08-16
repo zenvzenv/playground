@@ -285,6 +285,55 @@
     3. Spark程序的注册是通过SparkContext实例化时产生的对象来完成的(其实是SchedulerBackend来完成的)
     4. Spark程序在运行时，需要通过ClusterManager获取具体的计算资源，计算资源也是通过SparkContext所产生的对象来申请的(其实时SchedulerBackend来获取计算资源的)
     5. SparkContext崩溃或结束的时候整个Spark程序也就结束了
+3. SparkContext解析
+    1. SparkContext会构建Spark的三大核心：DAGScheduler,TaskScheduler和SchedulerBackend
+        >由于在RDD的一系操作中，**如果一些连续的操作都是窄依赖操作的话，那么它们的执行是可以并行的，这一系列操作会形成pipeline的形式去处理数据**，而宽依赖则不行。<br/>
+        >Spark中的Stage的划分就是以宽依赖来划分的，将一个Job(一个Action操作会生成一个Job，有多少个Action就有多少个Job)划分成多个Stage，一个Stage里面的任务，被抽象成TaskSet，一个TaskSet中包含很多Task(一个Partition对应一个Task)，同一个Stage中的Task的操作逻辑是相同的，只是要处理的数据不同
+        1. TaskScheduler
+            1. 创建TaskScheduler
+            ```scala
+            // Create and start the scheduler
+            //createTaskScheduler的具体事现参见org.apache.spark.SparkContext#createTaskScheduler
+            val (sched, ts) = SparkContext.createTaskScheduler(this, master, deployMode)
+            _schedulerBackend = sched
+            //创建TaskScheduler和DAGScheduler的顺序不能颠倒，DAGScheduler管理着TaskScheduler，DAGScheduler的创建依赖着TaskScheduler
+            _taskScheduler = ts
+            _dagScheduler = new DAGScheduler(this)
+            _heartbeatReceiver.ask[Boolean](TaskSchedulerIsSet)
+            ```
+        2. DAGScheduler
+            1. 创建DAGScheduler
+            ```scala
+            _dagScheduler = new DAGScheduler(this)
+            //DAGScheduler类
+            private[spark] class DAGScheduler(
+                private[scheduler] val sc: SparkContext,
+                private[scheduler] val taskScheduler: TaskScheduler,
+                listenerBus: LiveListenerBus,
+                mapOutputTracker: MapOutputTrackerMaster,
+                blockManagerMaster: BlockManagerMaster,
+                env: SparkEnv,
+                clock: Clock = new SystemClock())
+              extends Logging {
+                //DAGScheduler的创建依赖taskScheduler
+                //需要事先创建好taskScheduler
+                def this(sc: SparkContext) = this(sc, sc.taskScheduler)
+                def this(sc: SparkContext, taskScheduler: TaskScheduler) = {
+                  this(
+                    sc,
+                    taskScheduler,
+                    sc.listenerBus,
+                    sc.env.mapOutputTracker.asInstanceOf[MapOutputTrackerMaster],
+                    sc.env.blockManager.master,
+                    sc.env)
+                }
+            }
+            ```
+        3. SchedulerBackend
+            1. 创建SchedulerBackend
+            ```scala
+            _schedulerBackend = sched
+            ```
 ## 算子
 预先输出的RDD，注意RDD中是不存数据的，只存运算的逻辑，RDD生成的Task来执行真正的计算
 ```java
@@ -864,7 +913,7 @@
     3. Shuffle的定义
         Shuffle的含义是洗牌,将数据打散，父RDD中的一个partition中的数据如果给了子RDD的多个partition这就会产生Shuffle，
         Shuffle的过程中会产生网络传输，但是有网络传输并不一定是Shuffle
-    4. **注意：Spark会根据最后一个RDD从后往前进行依赖关系的推断，因为每个RDD中都会记录父RDD的信息，知道没有父RDD为止**
+    4. **注意：Spark会根据最后一个RDD从后往前进行依赖关系的推断，因为每个RDD中都会记录父RDD的信息，直到没有父RDD为止**
 3. Stage中的Task会形成TaskSet，然后传递给TaskScheduler，TaskScheduler调度Task(根据资源情况将Task调度到相应的Executor中去执行)，由Dirver把具体的Task发送到Executor中去执行
 4. Executor接受Task，首先将Task进行反序列化，然后将Task用一个实现了Runnable接口的实现类进行包装，然后将Task放入ThreadPool中去执行
 ## Spark中的对象实例化和序列化的一些总结
@@ -878,7 +927,7 @@
     5. **其实一个对象或者一个变量是通过闭包的方式被调用的话，那么这些对象或变量就会通过网络发送给其他节点上进行装载，通过网络传输势必会涉及到序列化**
 ## Worker、Executor、Job、Stage、Task和Partition的关系
 * 一个物理节点上可以有一个或多个Worker，Worker其实是一个JVM进程
-* 一个Executor可以并行执行多个Task，实际上Executor是一个JVM进程，Task是Executor进程中的一个线程，一个Task至少要独占用Executor中的一个Vcore
+* 一个Executor可以并行执行多个Task，实际上Executor是一个JVM进程，在Spark@Yarn的模式下，其进程名为CoarseGrainedExecutorBackend，一个CoarseGrainedExecutorBackend中有且仅有一个Executor对象，Task是Executor进程中的一个线程，一个Task至少要独占用Executor中的一个Vcore
 * Executor的个数是由 `--num-executors` 来指定，Executor中有多少个核心是有 `--executor-cores` 来指定的，一个Task要占几个核心是有 `--conf spark.task.cores=1` 来配置，默认一个Task占用一个core
 * 一个Application中的**`最大并行度 = Executor数目 * (每个Executor核心数 / 每个Task要占用的核心数)`**，注意：如果Spark读取的是HDFS上的文件时，Spark会按照一个block来划分分区，比如一个文件的大小时1345MB，一个block块的大小是128MB，那么Spark会生成1345MB/128M=11个Partition
 * 一个Job中会有一个或多个Stage，一个Stage中会有一个或多个Task，如果一次提交的Task过多，超出了**`最大并行度=Executor数目*(每个Executor核心数/每个Task要占用的核心数)`**的话，那么Task会被分批次执行，每次执行总cores个任务，等有cores空闲下来的时候再去执行剩余的Task
@@ -956,7 +1005,7 @@
         (systemMaxMemory * memoryFraction * safetyFraction).toLong
       }
     ```
-    3. Unroll空间：计算公式是-> `spark.executor.memory * saprk.sotrage.safetyFraction * spark.storage.memoryFraction * spark.storage.unrollFraction` 也就是 `Heap Size * 90% * 60% * 20% = 1.8G` ，你可以把序列化的数据放入内存中，当你需要使用数据时，需要对数据进行反序列化
+    3. Unroll空间：计算公式是-> `spark.executor.memory * spark.sotrage.safetyFraction * spark.storage.memoryFraction * spark.storage.unrollFraction` 也就是 `Heap Size * 90% * 60% * 20% = 1.8G` ，你可以把序列化的数据放入内存中，当你需要使用数据时，需要对数据进行反序列化
     ```scala
       // Max number of bytes worth of blocks to evict when unrolling
       //存储序列化的数据，Spark从此区域取出数据进行反序列化
