@@ -24,6 +24,64 @@
         3. RDD的缓存：如果一个RDD的血统过长，那么在数据都是进行重算时效率将会很低，那么我们可以把后续需要用到的RDD进行缓存起来，这样Spark会切断血统，提升重算效率
         4. RDD的行动：行动算子用来触发转换算子的执行，一个application中有几个job取决于有几个行动算子，**有几个Action算子就会有几个Job，Job与Job之间的Stage是不共用的，每个Job的Stage划分是独立划分的。**
         5. RDD的输出：Spark可以将得到的结果输出到hdfs上，也可以时本地文件系统，还可以收集最终结果到一个集合中以供后续操作
+    5. RDDInfo(RDD对象信息)，实现类： `org.apache.spark.storage.RDDInfo`
+        1. 实现源码
+        ```scala
+        @DeveloperApi
+        class RDDInfo(
+            val id: Int,//RDD的id
+            var name: String,//RDD的name
+            val numPartitions: Int,//RDD的分区数量
+            var storageLevel: StorageLevel,//RDD的存储级别，即org.apache.spark.storage.StorageLevel
+            val parentIds: Seq[Int],//RDD的父RDD的id序号，这里说明一个RDD会有一个到多个父RDD
+            val callSite: String = "",//RDD的用户调用栈
+            val scope: Option[RDDOperationScope] = None)//RDD的操作范围。scope的类型为RDDperationScope，每一个RDD都有一个RDDperationScope。RDDperationScope与Stage和Job之间并无特殊关系，一个RDDperationScope可以存在一个Stage中或存在多个Stage中。
+          extends Ordered[RDDInfo] {
+          //缓存的分区数量
+          var numCachedPartitions = 0
+          //使用的内存大小
+          var memSize = 0L
+          //使用的磁盘大小
+          var diskSize = 0L
+          //block存储在外部的大小
+          var externalBlockStoreSize = 0L
+          //此RDD是否已经被缓存
+          def isCached: Boolean = (memSize + diskSize > 0) && numCachedPartitions > 0
+        
+          override def toString: String = {
+            import Utils.bytesToString
+            ("RDD \"%s\" (%d) StorageLevel: %s; CachedPartitions: %d; TotalPartitions: %d; " +
+              "MemorySize: %s; DiskSize: %s").format(
+                name, id, storageLevel.toString, numCachedPartitions, numPartitions,
+                bytesToString(memSize), bytesToString(diskSize))
+          }
+          //由于RDDInfo继承了Ordered，所以重写了compare方法用于排序
+          override def compare(that: RDDInfo): Int = {
+            this.id - that.id
+          }
+        }
+        //RDDInfo的伴生对象
+        private[spark] object RDDInfo {
+          def fromRdd(rdd: RDD[_]): RDDInfo = {
+            //如果没有指定RDD的名字，则调用org.apache.spark.util.Utils中的getFormattedClassName方法自动生成一个随机名字
+            val rddName = Option(rdd.name).getOrElse(Utils.getFormattedClassName(rdd))
+            //获取当前RDD依赖的所有父RDD的身份标识作为RDDInfo的parentIds的属性
+            val parentIds = rdd.dependencies.map(_.rdd.id)
+            val callsiteLongForm = Option(SparkEnv.get)
+              .map(_.conf.get(EVENT_LOG_CALLSITE_LONG_FORM))
+              .getOrElse(false)
+        
+            val callSite = if (callsiteLongForm) {
+              rdd.creationSite.longForm
+            } else {
+              rdd.creationSite.shortForm
+            }
+            //创建RDDInfo对象
+            new RDDInfo(rdd.id, rddName, rdd.partitions.length,
+              rdd.getStorageLevel, parentIds, callSite, rdd.scope)
+          }
+        }
+        ```
 ## RDD的五大属性
 1. partition(分区)
     1. 每个RDD都包含多个partition，这是RDD中最基本的单位，也是最小的计算粒度，每个partition有一条Task线程去处理，即有多少个分区就会有多少个Task。
@@ -118,6 +176,7 @@
     ```
    3. `org.apache.spark.HashPartitioner` 中对于数据的分配实现如下，HashPartitioner是基于Object的hashcode来分区的，所以不应该对集合类型进行哈希分区
    ```scala
+      //计算出下游RDD的各个分区
       def getPartition(key: Any): Int = key match {
         case null => 0
         case _ => Utils.nonNegativeMod(key.hashCode, numPartitions)
@@ -740,10 +799,15 @@
         @DeveloperApi
         class ShuffleDependency[K: ClassTag, V: ClassTag, C: ClassTag](
             @transient private val _rdd: RDD[_ <: Product2[K, V]],
+            //分区器Partitioner
             val partitioner: Partitioner,
+            //SparkEnv中创建serializer，即org.apache.spark.serializer.JavaSerializer
             val serializer: Serializer = SparkEnv.get.serializer,
+            //按key进行排序的scala.math.Ordering的实现类
             val keyOrdering: Option[Ordering[K]] = None,
+            //对map任务的输出数据进行聚合的聚合器
             val aggregator: Option[Aggregator[K, V, C]] = None,
+            //是否在map端进行聚合
             val mapSideCombine: Boolean = false)
           extends Dependency[Product2[K, V]] {
         
@@ -760,7 +824,7 @@
             Option(reflect.classTag[C]).map(_.runtimeClass.getName)
           //获取Shuffle Id
           val shuffleId: Int = _rdd.context.newShuffleId()
-        
+          //当前ShuffleDependency的处理器
           val shuffleHandle: ShuffleHandle = _rdd.context.env.shuffleManager.registerShuffle(
             shuffleId, _rdd.partitions.length, this)
         
