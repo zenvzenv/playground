@@ -345,6 +345,50 @@
     4. Spark程序在运行时，需要通过ClusterManager获取具体的计算资源，计算资源也是通过SparkContext所产生的对象来申请的(其实时SchedulerBackend来获取计算资源的)
     5. SparkContext崩溃或结束的时候整个Spark程序也就结束了
 3. SparkContext解析
+    1. SparkContext的主要组成部分
+        1. **org.apache.spark.SparkEnv**：Spark运行时环境。Executor是是处理任务的执行器，它依赖于SparkEnv提供的运行环境。此外在Driver中也包含了SparkEnv。这是为了在local模式下任务的执行。SparkEnv中包含了很多的组件，例如serializerManager、RpcEnv、BlockManager、mapOutputTracker等，读者在这里只需要认识它们即可，第5章将会对这些组件进行具体介绍。
+        2. **org.apache.spark.scheduler.LiveListenerBus**：SparkContext中的事件总线，可以接收各个使用方的事件，并且通过异步方式对事件匹配后调用SparkListener的不同的方法。
+        3. **org.apache.spark.ui.SparkUI**：Spark的用户界面。SparkUI间接依赖于计算引擎、调度系统、存储体系、作业(Job)、阶段(Stage)、存储、执行器(Executor)等组件的监控数据都会以SparkListenerEvent的形式投递到LiveListenerBus中，SparkUI从各个SparkListener中读取数据并显示到web页面上
+        4. **org.apache.spark.SparkStatusTracker**：提供对作业、Stage等的监控信息。SparkStatus是一个低级的API，只提供非常脆弱的一致性机制
+        5. **org.apache.spark.ui.ConsoleProgressBar**：利用SparkStatusTrack的API，在控制台展示Stage的进度。由于SparkStatusTrack存在一致性问题，所以ConsoleProgressBar的显示会有延时
+        6. **org.apache.spark.scheduler.DAGScheduler**：DAG调度器，是调度系统的重要组件之一。负责创建Job，将DAG中的RDD划分到不同的Stage中、提交Stage等。SparkUI中有关Job和Stage的监控数据都来自于DAGScheduler。
+        7. **org.apache.spark.scheduler.TaskSchedulerImpl**：任务调度器，是调度系统的重要组件之一。TaskScheduler按照调度算法对集群管理器已经分配给应用的资源进行二次调度后分配给任务。TaskScheduler调度的Task是由DAGScheduler创建的，所以DAGScheduler是TaskScheduler的前置调度。
+        8. **org.apache.spark.HeartbeatReceiver**：心跳接收器。所有执行的Executor都会向HeartbeatReceiver发送心跳通知，HeartbeatReceiver接收到Executor的心跳之后，首先更新Executor的最后可见时间，然后将此信息交由TaskScheduler做进一步处理。
+        9. **org.apache.spark.ContextCleaner**：上下文清理器。ContextCleaner实际采用异步的方式清理那些超出俎作用域范围的RDD、ShuffleDependency和Broadcast等信息。
+        10. **JobProgressListener**：作业进度监听器。JobProgressListener将被注册到LiveListenerBus中作为事件监听器之一使用。
+        11. **org.apache.spark.scheduler.EventLoggingListener**：将事件持久化到存储的监听器中，是可选组件。当 `spark.eventLog.enable` 为true时启用。
+        12. **org.apache.spark.ExecutorAllocationManager**：Executor动态分配管理器。顾名思义，可以根据工作负载动态调整Executor的数量。在配置 `spark.dynamicallocation.enable` 为true的前提下，在非local模式下或者当 `spark.dynanicAllocation.testing` 属性为true时启用。
+        13. **org.apache.hadoop.util.ShutdownHookManager**：用于关闭程序时的钩子函数，这样可以在JVM退出的时候执行一些清理工作。
+    2. SparkContext的重要属性
+        1. `private val creationSite: CallSite = Utils.getCallSite()`：其中保存着线程栈中最靠近栈顶的用户定义的类及最靠近栈底的Scala或者Spark核心类信息，CallSite的shortForm属性保存着以上信息的简短描述，CallSite的longForm属性则保存着以上信息的完整描述。
+        2. `private val allowMultipleContexts: Boolean = config.getBoolean("spark.driver.allowMultipleContexts", false)`：是否允许多个SparkContext实例。默认为false，可以通过属性 `spark.driver.allowMultipleContext` 来控制。
+        3. `val startTime = System.currentTimeMillis()`：SparkContext启动的时间戳
+        4. `private[spark] val stopped: AtomicBoolean = new AtomicBoolean(false)`：标记SparkContext的状态是否已经停止，采用AtomicBoolean类型，保证原子性
+        5. `private[spark] val addedFiles = new ConcurrentHashMap[String, Long]().asScala`：用于每个本地文件的URL与添加此文件到addedFiles时的时间戳之间的映射缓存。
+        6. `private[spark] val addedJars = new ConcurrentHashMap[String, Long]().asScala`：用于每个本地Jar文件的URL与添加此文件到addedJars时的时间戳之间的映射缓存。
+        7. `private[spark] val persistentRdds = {
+                val map: ConcurrentMap[Int, RDD[_]] = new MapMaker().weakValues().makeMap[Int, RDD[_]]()
+                map.asScala
+              }`：对所有持久化的RDD进行追踪。
+        8. `private[spark] val executorEnvs = HashMap[String, String]()`：用户存储环境变量。executorEnvs中存储的变量将传递给执行任务的Executor使用。
+        9. `val sparkUser = Utils.getCurrentUserName()`：当前运行SparkContext实例的用户
+        10. `private[spark] var checkpointDir: Option[String] = None`：RDD计算过程中保存检查点所需要的目录
+        11. `private var _conf: SparkConf = _ ; _conf = config.clone()`：SparkContext的配置信息，通过调用SparkConf的clone方法的克隆体。在SparkContext初始化过程中会对_conf中的配置信息做校验
+            * 例如：用户必须给自己的应用程序设置spark.master（采用的部署模式）和spark.app.name（用户应用的名称）；用户设置的spark.master属性为yarn时，spark.submit.deployMode属性必须为cluster且必须设置spark.yarn.app.id属性。
+        12. `private var _jars: Seq[String] = _ ; _jars = Utils.getUserJars(_conf)`：用户设置的额外的jar包依赖，可以用 `--jars` 或 `spark.jars` 来指定额外的jar包
+        13. `private var _files: Seq[String] = _ ; _files = _conf.getOption("spark.files").map(_.split(",")).map(_.filter(_.nonEmpty)).toSeq.flatten`：用户设置的额外文件，由 `--files` 或 `spark.files` 来指定文件
+        14. `private var _executorMemory: Int = _ ; _executorMemory = _conf.getOption("spark.executor.memory")
+                                                          .orElse(Option(System.getenv("SPARK_EXECUTOR_MEMORY")))
+                                                          .orElse(Option(System.getenv("SPARK_MEM"))
+                                                          .map(warnSparkMem))
+                                                          .map(Utils.memoryStringToMb)
+                                                          .getOrElse(1024)`：Executor的内存大小，默认为1024MB。
+        15. `private var _applicationId: String = _ ; _applicationId = _taskScheduler.applicationId()`：当前应用的标识。TaskScheduler启动后会创建应用标识，SparkContext从TaskScheduler中获取_applicationId属性
+        16. `private var _applicationAttemptId: Option[String] = None ; _applicationAttemptId = taskScheduler.applicationAttemptId()`：当前应用尝试执行的标识。SparkDriver在执行时会多次尝试，每次尝试都会生成一个标识来代表应用尝试的身份。
+        17. `private var _listenerBusStarted: Boolean = false`：LiveListenerBus是否已经启动的标识
+        18. `private var _schedulerBackend: SchedulerBackend = _ ;`：资源调度的重要实现类，根据启动模式的不同来实例化不同的实例对象。如果master是standalone模式则实例化 `org.apache.spark.scheduler.cluster.StandaloneSchedulerBackend.StandaloneSchedulerBackend`
+        19. `private val nextShuffleId = new AtomicInteger(0)`：用于生成下一个Shuffle身份标识，AtomicInteger保证原子安全
+        20. `private val nextRddId = new AtomicInteger(0)`：用于生成下一个RDD身份标识，AtomicInteger保证原子安全
     1. SparkContext会构建Spark的三大核心：DAGScheduler,TaskScheduler和SchedulerBackend
         >由于在RDD的一系操作中，**如果一些连续的操作都是窄依赖操作的话，那么它们的执行是可以并行的，这一系列操作会形成pipeline的形式去处理数据**，而宽依赖则不行。<br/>
         >Spark中的Stage的划分就是以宽依赖来划分的，将一个Job(一个Action操作会生成一个Job，有多少个Action就有多少个Job)划分成多个Stage，一个Stage里面的任务，被抽象成TaskSet，一个TaskSet中包含很多Task(一个Partition对应一个Task)，同一个Stage中的Task的操作逻辑是相同的，只是要处理的数据不同
@@ -360,6 +404,11 @@
             _dagScheduler = new DAGScheduler(this)
             _heartbeatReceiver.ask[Boolean](TaskSchedulerIsSet)
             ```
+        2. TaskScheduler初始化机制：
+            1. 首相在SparkContext中调用createTaskScheduler方法，这个方法比较关键，createTaskScheduler这个方法会创建几个比较重要的对象： `org.apache.spark.scheduler.TaskSchedulerImpl`,`org.apache.spark.scheduler.SchedulerBackend`
+                1. `org.apache.spark.scheduler.TaskSchedulerImpl` 就是TaskScheduler，TaskSchedulerImpl底层依赖SchedulerBackend来工作
+                2. `org.apache.spark.scheduler.SchedulerBackend` ，在standalone模式下是具体的 `org.apache.spark.scheduler.cluster.StandaloneSchedulerBackend` 类，它接收TaskSchedulerImpl的控制，实际上负责与Master的注册、Executor的反向注册，把Task发送到Executor等操作
+                3. SchedulerPool
         2. DAGScheduler
             1. 创建DAGScheduler
             ```scala
@@ -775,7 +824,64 @@
     3. 在Driver端可以修改广播变量的值，但是在Executor中不能修改广播变量的值
     4. 如果Executor端用到了Driver端的变量，如果没有使用广播变量的话那么有多少个Task就会有多少个变量的副本；如果使用了广播变量的话，那么不论有多少个Task，变量的副本始终是一份
     5. **广播变量是存储在Executor中的MemoryStore中的**
-2. 累加器        
+2. 累加器
+## 广播管理器( `org.apache.spark.broadcast.BroadcastManager` )
+1. BroadcastManager用于将配置信息和序列化后的RDD、Job以及ShuffleDependency等信息本地存储。如果为了容灾，也会复制到其他节点上，BroadcastManager的类签名如下
+```scala
+private[spark] class BroadcastManager(
+    //是否是Driver
+    val isDriver: Boolean,
+    //SparkConf
+    conf: SparkConf,
+    //安全管理器
+    securityManager: SecurityManager)
+  extends Logging {
+  //是否以及被初始化
+  private var initialized = false
+  //广播工厂实例
+  private var broadcastFactory: BroadcastFactory = null
+  //下一个广播对象的的广播ID，使用AtomicLong保证原子性
+  private val nextBroadcastId = new AtomicLong(0)
+  initialize()
+
+  // Called by SparkContext or Executor before using Broadcast
+  // BroadcastManager在初始化过程中就会调用自己的initialize方法，当initialize执行完毕之后，BroadcastManager就正式生效了。
+  private def initialize() {
+    //同步代码块，确保BroadcastManager只初始化一次
+    synchronized {
+      //首先判断BroadcastManager是否已经被初始化过
+      if (!initialized) {
+        //新建TorrentBroadcastFactory(`org.apache.spark.broadcast.TorrentBroadcastFactory`)作为BroadcastFactory的实例
+        //从Spark2.x开始，Spark的BroadcastManager的实例固定为TorrentBroadcastManager
+        broadcastFactory = new TorrentBroadcastFactory
+        //调用TorrentBroadcastFactory的initialize方法对TorrentBroadcastFactory进行初始化
+        broadcastFactory.initialize(isDriver, conf, securityManager)
+        //更新初始化状态，标记为true，表示初始化完毕
+        initialized = true
+      }
+    }
+  }
+  /**
+   * BroadcastManager的三个方法都分别代理了TorrentBroadcastManager的三个方法
+   */
+  def stop() {
+    broadcastFactory.stop()
+  }
+
+  private[broadcast] val cachedValues = {
+    new ReferenceMap(AbstractReferenceMap.HARD, AbstractReferenceMap.WEAK)
+  }
+
+  def newBroadcast[T: ClassTag](value_ : T, isLocal: Boolean): Broadcast[T] = {
+    broadcastFactory.newBroadcast[T](value_, isLocal, nextBroadcastId.getAndIncrement())
+  }
+
+  def unbroadcast(id: Long, removeFromDriver: Boolean, blocking: Boolean) {
+    broadcastFactory.unbroadcast(id, removeFromDriver, blocking)
+  }
+}
+```
+
 ## 宽依赖和窄依赖
 1. 宽依赖：父RDD中的一个partition给了子RDD的**多个**partition，父RDD中的一个partition对应子RDD中的多个partition
     * 现阶段需要依赖上一个Stage的全部内容运算结果，上一个Stage需要全部完成，然后经过shuffle，才能开始这个Stage。
@@ -1015,6 +1121,15 @@
 8. 开窗函数
     * row_number()函数：就是按照某个字段分组，然后取另一个字段的前几个值，相当于分组取topN
     * 开窗函数的格式 `row_number() over (partition by xxx order by xxx)`
+        1. 
+    * 常用的开窗函数 `over` 有如下：
+        1. 为每一条数据显示聚合信息：(聚合函数() over())
+        2. 为每条数据提供分组的聚合函数结果(聚合函数() over(partition by 字段) as 别名)
+        3. 与排名函数一起使用(row number() over(order by 字段) as 别名)
+            * `ROW_NUMBER() OVER()` 
+            * `RANK() OVER()`
+            * `DENSE_RANK() OVER()`
+            * `NTILE(n) OVER()`
 9. RDD、DataFrame和Dataset
     1. RDD
         1. RDD时懒执行的不可变的，可以支持lambda表达式的并行"数据集合"
