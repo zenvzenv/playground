@@ -334,114 +334,491 @@
         }
       }
     ```
+## SparkConf
+SparkConf是SparkContext初始化的必要前提，了解了SparkConf对于了解SparkContext会有很大的帮助。
+### 1.主要构造方法
+```scala
+class SparkConf(loadDefaults: Boolean) extends Cloneable with Logging with Serializable {
+    //从SparkConf的伴生对象导入，它们主要管理过期的、旧版本的配置项，以及日志输出
+    import SparkConf._
+    //采用ConcurrentHasMap来存放所有的配置项，保证多线程环境下的线程安全和效率问题
+    private val settings = new ConcurrentHashMap[String, String]()
+    if (loadDefaults) {
+      loadFromSystemProperties(false)
+    }
+    private[spark] def loadFromSystemProperties(silent: Boolean): SparkConf = {
+        // Load any spark.* system properties
+        for ((key, value) <- Utils.getSystemProperties if key.startsWith("spark.")) {
+          set(key, value, silent)
+        }
+        this
+    }
+}
+```
+SparkConf中的主构造函数参数 `loadDefaults` 它指示是否要从Java的系统属性(即System.getProperties()和-Dkey=value指定的参数)中加载Spark相关的属性，默认是true即从Java的系统属性中获取Spark的属性。
+### 2.设置配置项
+* 如果要配置Spark的配置项，有以下三种方法
+    1. 直接使用 `set` 方法，这是我们最常使用的方法。SparkConf中提供了多种set方法，最基础的set方法重载如下
+    ```scala
+      private[spark] def set(key: String, value: String, silent: Boolean): SparkConf = {
+        if (key == null) {
+          throw new NullPointerException("null key")
+        }
+        if (value == null) {
+          throw new NullPointerException("null value for " + key)
+        }
+        if (!silent) {
+          logDeprecationWarning(key)
+        }
+        settings.put(key, value)
+        this
+      }
+    ```
+    可见SparkConf中的key和value都不能为 `null` 。并且每次set之后都返回 `this` 对象，所以支持链式调用，另外还有一些快速设置配置项的方法，如 `setMaster()` 和 `setAppName()` 它们最终都会调用 `set` 方法。
+    ```scala
+      /**
+       * The master URL to connect to, such as "local" to run locally with one thread, "local[4]" to
+       * run locally with 4 cores, or "spark://master:7077" to run on a Spark standalone cluster.
+       */
+      def setMaster(master: String): SparkConf = {
+        set("spark.master", master)
+      }
+    
+      /** Set a name for your application. Shown in the Spark web UI. */
+      def setAppName(name: String): SparkConf = {
+        set("spark.app.name", name)
+      }
+    ```
+    2. 通过系统属性加载Spark属性，通过主构造器我们知道SparkConf会默认从Java的系统属性中加载Spark属性
+    ```scala
+      private[spark] def loadFromSystemProperties(silent: Boolean): SparkConf = {
+        // Load any spark.* system properties
+        for ((key, value) <- Utils.getSystemProperties if key.startsWith("spark.")) {
+          set(key, value, silent)
+        }
+        this
+      }
+    ```
+    如果我们直接 `new SparkConf()` 的话，将会调用 `def this()=this(true)` 默认从Java的系统属性中加载以 `spark.` 开头的属性。
+    3. clone SparkConf，SparkConf类继承了 `scala.Cloneable` 特质，并覆写了 `clone()` 方法，因此SparkConf是可以(深)克隆的。
+    ```scala
+      /** Copy this object */
+      override def clone: SparkConf = {
+        val cloned = new SparkConf(false)
+        settings.entrySet().asScala.foreach { e =>
+          cloned.set(e.getKey(), e.getValue(), true)
+        }
+        cloned
+      }
+    ```
+    虽然ConcurrentHashMap保证的线程安全，不会影响SparkConfs实例共享，但在高并发的情况下，锁机制还是会带来性能的损耗，我们可以把SparkConf克隆到多个组件中，以便让他们获得相同的配享。
+### 3.获取配置项
+获得配置项只有一个途径，即调用 `get` 方法。
+```scala
+  /** Get a parameter; throws a NoSuchElementException if it's not set */
+  def get(key: String): String = {
+    getOption(key).getOrElse(throw new NoSuchElementException(key))
+  }
+  /** Get a parameter, falling back to a default if not set */
+  def get(key: String, defaultValue: String): String = {
+    getOption(key).getOrElse(defaultValue)
+  }
+  /** Get a parameter as an Option */
+  def getOption(key: String): Option[String] = {
+    Option(settings.get(key)).orElse(getDeprecatedConfig(key, settings))
+  }
+```
+在获取配置项时，同时会检查过期配置(getDeprecatedConfig方法是在伴生对象中定义的)，并使用Scala的Option包装返回的接口，对于有值(scala.Some)和无值(scala.None)的情况可以灵活处理。
+### 4.校验配置项
+SparkConf中有一个校验配置项的方法 `org.apache.spark.SparkConf.validateSettings` 主要对过期配置配置的告警，以及对非法设置或不兼容的配置项抛出异常(由于validateSettings方法源码过长但是逻辑比较简单，这里就不上代码了)
 ## Spark天堂之门--SparkContext
-1. SparkContext会伴随着整个Spark程序的生命周期，SparkContext是Spark程序通往集群的的唯一通道，是程序的起点也是程序的终点，SparkContext会创建三大核心对象TaskSchedulerImpl,DAGScheduler和SchedulerBackend。
-2. 什么是Spark的天堂之门
-    1. Spark程序在运行时分为Driver和Executor两部分
-    2. Spark编程是基于SparkContext的
-        1. Spark的核心基础是RDD，整个程序的第一个RDD是由SparkContext来创建的，
-        2. Spark的程序调度优化也是基于SparkContext的，首先进行调度优化
-    3. Spark程序的注册是通过SparkContext实例化时产生的对象来完成的(其实是SchedulerBackend来完成的)
-    4. Spark程序在运行时，需要通过ClusterManager获取具体的计算资源，计算资源也是通过SparkContext所产生的对象来申请的(其实时SchedulerBackend来获取计算资源的)
-    5. SparkContext崩溃或结束的时候整个Spark程序也就结束了
-3. SparkContext解析
-    1. SparkContext的主要组成部分
-        1. **org.apache.spark.SparkEnv**：Spark运行时环境。Executor是是处理任务的执行器，它依赖于SparkEnv提供的运行环境。此外在Driver中也包含了SparkEnv。这是为了在local模式下任务的执行。SparkEnv中包含了很多的组件，例如serializerManager、RpcEnv、BlockManager、mapOutputTracker等，读者在这里只需要认识它们即可，第5章将会对这些组件进行具体介绍。
-        2. **org.apache.spark.scheduler.LiveListenerBus**：SparkContext中的事件总线，可以接收各个使用方的事件，并且通过异步方式对事件匹配后调用SparkListener的不同的方法。
-        3. **org.apache.spark.ui.SparkUI**：Spark的用户界面。SparkUI间接依赖于计算引擎、调度系统、存储体系、作业(Job)、阶段(Stage)、存储、执行器(Executor)等组件的监控数据都会以SparkListenerEvent的形式投递到LiveListenerBus中，SparkUI从各个SparkListener中读取数据并显示到web页面上
-        4. **org.apache.spark.SparkStatusTracker**：提供对作业、Stage等的监控信息。SparkStatus是一个低级的API，只提供非常脆弱的一致性机制
-        5. **org.apache.spark.ui.ConsoleProgressBar**：利用SparkStatusTrack的API，在控制台展示Stage的进度。由于SparkStatusTrack存在一致性问题，所以ConsoleProgressBar的显示会有延时
-        6. **org.apache.spark.scheduler.DAGScheduler**：DAG调度器，是调度系统的重要组件之一。负责创建Job，将DAG中的RDD划分到不同的Stage中、提交Stage等。SparkUI中有关Job和Stage的监控数据都来自于DAGScheduler。
-        7. **org.apache.spark.scheduler.TaskSchedulerImpl**：任务调度器，是调度系统的重要组件之一。TaskScheduler按照调度算法对集群管理器已经分配给应用的资源进行二次调度后分配给任务。TaskScheduler调度的Task是由DAGScheduler创建的，所以DAGScheduler是TaskScheduler的前置调度。
-        8. **org.apache.spark.HeartbeatReceiver**：心跳接收器。所有执行的Executor都会向HeartbeatReceiver发送心跳通知，HeartbeatReceiver接收到Executor的心跳之后，首先更新Executor的最后可见时间，然后将此信息交由TaskScheduler做进一步处理。
-        9. **org.apache.spark.ContextCleaner**：上下文清理器。ContextCleaner实际采用异步的方式清理那些超出俎作用域范围的RDD、ShuffleDependency和Broadcast等信息。
-        10. **JobProgressListener**：作业进度监听器。JobProgressListener将被注册到LiveListenerBus中作为事件监听器之一使用。
-        11. **org.apache.spark.scheduler.EventLoggingListener**：将事件持久化到存储的监听器中，是可选组件。当 `spark.eventLog.enable` 为true时启用。
-        12. **org.apache.spark.ExecutorAllocationManager**：Executor动态分配管理器。顾名思义，可以根据工作负载动态调整Executor的数量。在配置 `spark.dynamicallocation.enable` 为true的前提下，在非local模式下或者当 `spark.dynanicAllocation.testing` 属性为true时启用。
-        13. **org.apache.hadoop.util.ShutdownHookManager**：用于关闭程序时的钩子函数，这样可以在JVM退出的时候执行一些清理工作。
-    2. SparkContext的重要属性
-        1. `private val creationSite: CallSite = Utils.getCallSite()`：其中保存着线程栈中最靠近栈顶的用户定义的类及最靠近栈底的Scala或者Spark核心类信息，CallSite的shortForm属性保存着以上信息的简短描述，CallSite的longForm属性则保存着以上信息的完整描述。
-        2. `private val allowMultipleContexts: Boolean = config.getBoolean("spark.driver.allowMultipleContexts", false)`：是否允许多个SparkContext实例。默认为false，可以通过属性 `spark.driver.allowMultipleContext` 来控制。
-        3. `val startTime = System.currentTimeMillis()`：SparkContext启动的时间戳
-        4. `private[spark] val stopped: AtomicBoolean = new AtomicBoolean(false)`：标记SparkContext的状态是否已经停止，采用AtomicBoolean类型，保证原子性
-        5. `private[spark] val addedFiles = new ConcurrentHashMap[String, Long]().asScala`：用于每个本地文件的URL与添加此文件到addedFiles时的时间戳之间的映射缓存。
-        6. `private[spark] val addedJars = new ConcurrentHashMap[String, Long]().asScala`：用于每个本地Jar文件的URL与添加此文件到addedJars时的时间戳之间的映射缓存。
-        7. `private[spark] val persistentRdds = {
-                val map: ConcurrentMap[Int, RDD[_]] = new MapMaker().weakValues().makeMap[Int, RDD[_]]()
-                map.asScala
-              }`：对所有持久化的RDD进行追踪。
-        8. `private[spark] val executorEnvs = HashMap[String, String]()`：用户存储环境变量。executorEnvs中存储的变量将传递给执行任务的Executor使用。
-        9. `val sparkUser = Utils.getCurrentUserName()`：当前运行SparkContext实例的用户
-        10. `private[spark] var checkpointDir: Option[String] = None`：RDD计算过程中保存检查点所需要的目录
-        11. `private var _conf: SparkConf = _ ; _conf = config.clone()`：SparkContext的配置信息，通过调用SparkConf的clone方法的克隆体。在SparkContext初始化过程中会对_conf中的配置信息做校验
-            * 例如：用户必须给自己的应用程序设置spark.master（采用的部署模式）和spark.app.name（用户应用的名称）；用户设置的spark.master属性为yarn时，spark.submit.deployMode属性必须为cluster且必须设置spark.yarn.app.id属性。
-        12. `private var _jars: Seq[String] = _ ; _jars = Utils.getUserJars(_conf)`：用户设置的额外的jar包依赖，可以用 `--jars` 或 `spark.jars` 来指定额外的jar包
-        13. `private var _files: Seq[String] = _ ; _files = _conf.getOption("spark.files").map(_.split(",")).map(_.filter(_.nonEmpty)).toSeq.flatten`：用户设置的额外文件，由 `--files` 或 `spark.files` 来指定文件
-        14. `private var _executorMemory: Int = _ ; _executorMemory = _conf.getOption("spark.executor.memory")
-                                                          .orElse(Option(System.getenv("SPARK_EXECUTOR_MEMORY")))
-                                                          .orElse(Option(System.getenv("SPARK_MEM"))
-                                                          .map(warnSparkMem))
-                                                          .map(Utils.memoryStringToMb)
-                                                          .getOrElse(1024)`：Executor的内存大小，默认为1024MB。
-        15. `private var _applicationId: String = _ ; _applicationId = _taskScheduler.applicationId()`：当前应用的标识。TaskScheduler启动后会创建应用标识，SparkContext从TaskScheduler中获取_applicationId属性
-        16. `private var _applicationAttemptId: Option[String] = None ; _applicationAttemptId = taskScheduler.applicationAttemptId()`：当前应用尝试执行的标识。SparkDriver在执行时会多次尝试，每次尝试都会生成一个标识来代表应用尝试的身份。
-        17. `private var _listenerBusStarted: Boolean = false`：LiveListenerBus是否已经启动的标识
-        18. `private var _schedulerBackend: SchedulerBackend = _ ;`：资源调度的重要实现类，根据启动模式的不同来实例化不同的实例对象。如果master是standalone模式则实例化 `org.apache.spark.scheduler.cluster.StandaloneSchedulerBackend.StandaloneSchedulerBackend`
-        19. `private val nextShuffleId = new AtomicInteger(0)`：用于生成下一个Shuffle身份标识，AtomicInteger保证原子安全
-        20. `private val nextRddId = new AtomicInteger(0)`：用于生成下一个RDD身份标识，AtomicInteger保证原子安全
-    1. SparkContext会构建Spark的三大核心：DAGScheduler,TaskScheduler和SchedulerBackend
-        >由于在RDD的一系操作中，**如果一些连续的操作都是窄依赖操作的话，那么它们的执行是可以并行的，这一系列操作会形成pipeline的形式去处理数据**，而宽依赖则不行。<br/>
-        >Spark中的Stage的划分就是以宽依赖来划分的，将一个Job(一个Action操作会生成一个Job，有多少个Action就有多少个Job)划分成多个Stage，一个Stage里面的任务，被抽象成TaskSet，一个TaskSet中包含很多Task(一个Partition对应一个Task)，同一个Stage中的Task的操作逻辑是相同的，只是要处理的数据不同
-        1. TaskScheduler
-            1. 创建TaskScheduler
-            ```scala
-            // Create and start the scheduler
-            //createTaskScheduler的具体事现参见org.apache.spark.SparkContext#createTaskScheduler
-            val (sched, ts) = SparkContext.createTaskScheduler(this, master, deployMode)
-            _schedulerBackend = sched
-            //创建TaskScheduler和DAGScheduler的顺序不能颠倒，DAGScheduler管理着TaskScheduler，DAGScheduler的创建依赖着TaskScheduler
-            _taskScheduler = ts
-            _dagScheduler = new DAGScheduler(this)
-            _heartbeatReceiver.ask[Boolean](TaskSchedulerIsSet)
-            ```
-        2. TaskScheduler初始化机制：
-            1. 首相在SparkContext中调用createTaskScheduler方法，这个方法比较关键，createTaskScheduler这个方法会创建几个比较重要的对象： `org.apache.spark.scheduler.TaskSchedulerImpl`,`org.apache.spark.scheduler.SchedulerBackend`
-                1. `org.apache.spark.scheduler.TaskSchedulerImpl` 就是TaskScheduler，TaskSchedulerImpl底层依赖SchedulerBackend来工作
-                2. `org.apache.spark.scheduler.SchedulerBackend` ，在standalone模式下是具体的 `org.apache.spark.scheduler.cluster.StandaloneSchedulerBackend` 类，它接收TaskSchedulerImpl的控制，实际上负责与Master的注册、Executor的反向注册，把Task发送到Executor等操作
-                3. SchedulerPool
-        2. DAGScheduler
-            1. 创建DAGScheduler
-            ```scala
-            _dagScheduler = new DAGScheduler(this)
-            //DAGScheduler类
-            private[spark] class DAGScheduler(
-                private[scheduler] val sc: SparkContext,
-                private[scheduler] val taskScheduler: TaskScheduler,
-                listenerBus: LiveListenerBus,
-                mapOutputTracker: MapOutputTrackerMaster,
-                blockManagerMaster: BlockManagerMaster,
-                env: SparkEnv,
-                clock: Clock = new SystemClock())
-              extends Logging {
-                //DAGScheduler的创建依赖taskScheduler
-                //需要事先创建好taskScheduler
-                def this(sc: SparkContext) = this(sc, sc.taskScheduler)
-                def this(sc: SparkContext, taskScheduler: TaskScheduler) = {
-                  this(
-                    sc,
-                    taskScheduler,
-                    sc.listenerBus,
-                    sc.env.mapOutputTracker.asInstanceOf[MapOutputTrackerMaster],
-                    sc.env.blockManager.master,
-                    sc.env)
-                }
-            }
-            ```
-        3. SchedulerBackend
-            1. 创建SchedulerBackend
-            ```scala
-            _schedulerBackend = sched
-            ```
+### 1.概述
+SparkContext会伴随着整个Spark程序的生命周期，SparkContext是Spark程序通往集群的的唯一通道，是程序的起点也是程序的终点，SparkContext会创建三大核心对象TaskSchedulerImpl,DAGScheduler和SchedulerBackend。
+### 2.什么是Spark的天堂之门
+1. Spark程序在运行时分为Driver和Executor两部分
+2. Spark编程是基于SparkContext的
+    1. Spark的核心基础是RDD，整个程序的第一个RDD是由SparkContext来创建的，
+    2. Spark的程序调度优化也是基于SparkContext的，首先进行调度优化
+3. Spark程序的注册是通过SparkContext实例化时产生的对象来完成的(其实是SchedulerBackend来完成的)
+4. Spark程序在运行时，需要通过ClusterManager获取具体的计算资源，计算资源也是通过SparkContext所产生的对象来申请的(其实时SchedulerBackend来获取计算资源的)
+5. SparkContext崩溃或结束的时候整个Spark程序也就结束了
+### 3.SparkContext解析
+#### 1.SparkContext构造函数
+SparkContext接收SparkConf作为类构造器参数，并且有多种辅助构造器方法的实现。
+```scala
+class SparkContext(config: SparkConf) extends Logging {
+  /**
+   * Create a SparkContext that loads settings from system properties (for instance, when
+   * launching with ./bin/spark-submit).
+   */
+  def this() = this(new SparkConf())
+  def this(master: String, appName: String, conf: SparkConf) = this(SparkContext.updatedConf(conf, master, appName))
+  def this(
+      master: String,
+      appName: String,
+      sparkHome: String = null,
+      jars: Seq[String] = Nil,
+      environment: Map[String, String] = Map()) = {
+    this(SparkContext.updatedConf(new SparkConf(), master, appName, sparkHome, jars, environment))
+  }
+  private[spark] def this(master: String, appName: String) = this(master, appName, null, Nil, Map())
+  private[spark] def this(master: String, appName: String, sparkHome: String) = this(master, appName, sparkHome, Nil, Map())
+  private[spark] def this(master: String, appName: String, sparkHome: String, jars: Seq[String]) = this(master, appName, sparkHome, jars, Map())
+}
+```
+主构造器在一个巨大的 `try-catch` 中，其中包含了很多组件的初始化逻辑.
+#### 2.SparkContext初始化组件
+在上述的 `try-catch` 代码块的上方，SparkContext预先声明了一批私有变量字段，且定义了获取该值的 `getter` 方法。它们用于维护SparkContext需要初始化的所有组件的内部状态。
+```scala
+private var _conf: SparkConf = _
+private var _eventLogDir: Option[URI] = None
+private var _eventLogCodec: Option[String] = None
+private var _listenerBus: LiveListenerBus = _
+private var _env: SparkEnv = _
+private var _statusTracker: SparkStatusTracker = _
+private var _progressBar: Option[ConsoleProgressBar] = None
+private var _ui: Option[SparkUI] = None
+private var _hadoopConfiguration: Configuration = _
+private var _executorMemory: Int = _
+private var _schedulerBackend: SchedulerBackend = _
+private var _taskScheduler: TaskScheduler = _
+private var _heartbeatReceiver: RpcEndpointRef = _
+@volatile private var _dagScheduler: DAGScheduler = _
+private var _applicationId: String = _
+private var _applicationAttemptId: Option[String] = None
+private var _eventLogger: Option[EventLoggingListener] = None
+private var _executorAllocationManager: Option[ExecutorAllocationManager] = None
+private var _cleaner: Option[ContextCleaner] = None
+private var _listenerBusStarted: Boolean = false
+private var _jars: Seq[String] = _
+private var _files: Seq[String] = _
+private var _shutdownHookRef: AnyRef = _
+private var _statusStore: AppStatusStore = _
+//初始化组件，即SparkContext的实际初始化顺序
+private[spark] def conf: SparkConf = _conf
+private[spark] def listenerBus: LiveListenerBus = _listenerBus
+private[spark] def env: SparkEnv = _env
+def statusTracker: SparkStatusTracker = _statusTracker
+private[spark] def progressBar: Option[ConsoleProgressBar] = _progressBar
+private[spark] def ui: Option[SparkUI] = _ui
+def hadoopConfiguration: Configuration = _hadoopConfiguration
+private[spark] def schedulerBackend: SchedulerBackend = _schedulerBackend
+private[spark] def taskScheduler: TaskScheduler = _taskScheduler
+private[spark] def taskScheduler_=(ts: TaskScheduler): Unit = {
+  _taskScheduler = ts
+}
+private[spark] def dagScheduler: DAGScheduler = _dagScheduler
+private[spark] def dagScheduler_=(ds: DAGScheduler): Unit = {
+  _dagScheduler = ds
+}
+private[spark] def eventLogger: Option[EventLoggingListener] = _eventLogger
+private[spark] def executorAllocationManager: Option[ExecutorAllocationManager] = _executorAllocationManager
+private[spark] def cleaner: Option[ContextCleaner] = _cleaner
+private[spark] def  : AppStatusStore = _statusStore
+```
+##### org.apache.spark.SparkConf
+它其实算不上是SparkContext的一个初始化组件，因为它是构造SparkContext的时候传进来的。SparkContext会将传入的SparkConf克隆一份副本，之后会在副本上做校验(主要是AppName和Master的校验)，及添加其他必要参数(Dirver地址、应用ID等)。这样用户就不可以在修改配置项，以保证SparkConf在运行期的不变性。
+#### org.apache.spark.scheduler.LiveListenerBus
+它是SparkContext中的事件总线，它异步的将事件源产生的事件( `org.apache.spark.scheduler.SparkListenerEvent` )投递给已经注册的监听器( `org.apache.spark.scheduler.SparkListener` ).Spark中广泛运用监听器模式，以适应集群状态下的分布式事件汇报。<br/>
+除了LiveListenerBus之外，Spark中还有很多事件总线，它们都继承自 `org.apache.spark.util.ListenerBus` 特质，事件总线式Spark底层重要的支撑组件。<br/>
+LiveListenerBus的初始化
+```scala
+_listenerBus = new LiveListenerBus(_conf)
+```
+#### org.apache.spark.status.AppStatusStore
+它式提供Spark程序运行中各项监控指标的键值对化存储。Web UI中见到的数据指标基本都在存在这里。
+对AppStatusStore的初始化
+```scala
+// Initialize the app status store and listener before SparkEnv is created so that it gets
+// all events.
+_statusStore = AppStatusStore.createLiveStore(conf)
+listenerBus.addToStatusQueue(_statusStore.listener.get)
+
+//org.apache.spark.status.AppStatusStore.createLiveStore方法
+def createLiveStore(conf: SparkConf): AppStatusStore = {
+    val store = new ElementTrackingStore(new InMemoryStore(), conf)
+    val listener = new AppStatusListener(store, conf, true)
+    new AppStatusStore(store, listener = Some(listener))
+}
+```
+可见AppStatusStore底层使用了ElementTrackingStore，它是能够跟踪元素及其数量的键值对存储结构，因此适用于监控。<br/>
+另外还会产生一个监听器AppStatusListener实例，并注册到LiveListenerBus上，用来收集监控数据。
+##### org.apache.spark.SparkEnv
+SparkEnv是Spark的执行环境，Driver和Executor的运行都需要SparkEnv提供的各类组件形成的环境来作为基础。其初始化代码如下：
+```scala
+// Create the Spark execution environment (cache, map output tracker, etc)
+_env = createSparkEnv(_conf, isLocal, listenerBus)
+//在创建Driver环境创建完毕之后，会调用SparkEnv伴生对象的set()方法保存它，这样就一处创建多处使用了。
+SparkEnv.set(_env)
+//org.apache.spark.SparkContext.createSparkEnv方法如下
+// This function allows components created by SparkEnv to be mocked in unit tests:
+private[spark] def createSparkEnv(
+  conf: SparkConf,
+  isLocal: Boolean,
+  listenerBus: LiveListenerBus): SparkEnv = {
+SparkEnv.createDriverEnv(conf, isLocal, listenerBus, SparkContext.numDriverCores(master, conf))
+}
+```
+可见SparkEnv的创建依赖于LiveListenerBus，并且在SparkContext初始化时只会创建Driver的执行环境，Executor的执行环境创建就是后话了。
+SparkEnv中包含了很多的组件，例如安全管理器SecurityManager,serializerManager、RpcEnv、块存储管理器BlockManager、mapOutputTracker，监控度量系统MetricsSystem等。<br/>
+SparkContext构造方法的后方，就会藉由SparkEnv先初始化BlockManager与启动MetricSystem，代码如下：
+```scala
+_env.blockManager.initialize(_applicationId)
+// The metrics system for Driver need to be set spark.app.id to app ID.
+// So it should start after we get app ID from the task scheduler and set spark.app.id.
+_env.metricsSystem.start()
+// Attach the driver metrics servlet handler to the web ui after the metrics system is started.
+_env.metricsSystem.getServletHandlers.foreach(handler => ui.foreach(_.attachHandler(handler)))
+```
+##### org.apache.spark.SparkStatusTracker
+SparkStatusTracker提供报告最近作业执行情况的低级API。它的内部只有6个方法，从AppStatusStore中查询并返回诸如Job/Stage ID、活跃/完成/失败的Task数、Executor内存用量等基础数据。它只能保证非常弱的一致性语义，也就是说它报告的信息会有延迟或缺漏
+##### org.apache.spark.ui.ConsoleProgressBar
+ConsoleProgressBar按行打印Stage的计算进度。它周期性地从AppStatusStore中查询Stage对应的各状态的Task数，并格式化成字符串输出。它可以通过 `spark.ui.showConsoleProgress` 参数控制开关，默认值false。由于SparkStatusTrack存在一致性问题，所以ConsoleProgressBar的显示会有延时
+##### org.apache.spark.ui.SparkUI
+SparkUI维护监控数据在Spark Web UI界面的展示。SparkUI间接依赖于计算引擎、调度系统、存储体系、作业(Job)、阶段(Stage)、存储、执行器(Executor)等组件的监控数据都会以SparkListenerEvent的形式投递到LiveListenerBus中，SparkUI从各个SparkListener中读取数据并显示到web页面上
+SparkUI的初始化代码如下：
+```scala
+_ui =
+      if (conf.getBoolean("spark.ui.enabled", true)) {
+        Some(SparkUI.create(Some(this), _statusStore, _conf, _env.securityManager, appName, "",
+          startTime))
+      } else {
+        // For tests, do not enable the UI
+        None
+      }
+// Bind the UI before starting the task scheduler to communicate
+// the bound port to the cluster manager properly
+_ui.foreach(_.bind())
+```
+可以通过 `spark.ui.enabled` 来控制是否启动SparkUI，其默认值为true，然后调用SparkUI的父类 `org.apache.spark.ui.WebUI.WebUI` 的 `bind()` 方法，将SparkUI绑定到特定的host:port上。
+##### org.apache.hadoop.conf.Configuration
+SparkContext会借助工具类SparkHadoopUtil初始化一些与Hadoop有关的配置，存放在Hadoop的Configuration实例中，如Amazon S3相关的配置，和以“spark.hadoop.”为前缀的Spark配置参数。
+##### org.apache.spark.HeartbeatReceiver
+所有执行的Executor都会向HeartbeatReceiver发送心跳通知，HeartbeatReceiver接收到Executor的心跳之后，首先更新Executor的最后可见时间，然后将此信息交由TaskScheduler做进一步处理，它本质上也是个监听器，继承了SparkListener。其初始化代码如下：
+```scala
+// We need to register "HeartbeatReceiver" before "createTaskScheduler" because Executor will
+// retrieve "HeartbeatReceiver" in the constructor. (SPARK-6640)
+_heartbeatReceiver = env.rpcEnv.setupEndpoint(HeartbeatReceiver.ENDPOINT_NAME, new HeartbeatReceiver(this))
+```
+HeartbeatReceiver通过RpcEnv最终包装成了一个RPC端点的引用即RpcEndpointRef，Spark集群的节点之间必然会有大量的网络通讯，心跳机制只是其中的一部分。因此Rpc框架同事件总线一样不可或缺。
+##### org.apache.spark.scheduler.SchedulerBackend
+SchedulerBackend负责向等待计算的Task分配计算资源，并在Executor上启动Task。它是一个Scala特征，有多种部署模式下的SchedulerBackend实现类。它在SparkContext中是和TaskScheduler一起初始化的，作为一个元组返回。其是初始化代码和TaskScheduler一并展现。
+##### org.apache.spark.scheduler.TaskSchedulerImpl
+TaskScheduler即任务调度器。它也是一个Scala特征，但只有一种实现，即TaskSchedulerImpl类。它负责提供Task的调度算法，并且会持有SchedulerBackend的实例，通过SchedulerBackend发挥作用。<br/>
+TaskScheduler按照调度算法对集群管理器已经分配给应用的资源进行二次调度后分配给任务。TaskScheduler调度的Task是由DAGScheduler创建的，所以DAGScheduler是TaskScheduler的前置调度。
+它们两个的初始化代码如下。
+```scala
+val (sched, ts) = SparkContext.createTaskScheduler(this, master, deployMode)
+_schedulerBackend = sched
+_taskScheduler = ts
+/**
+* 方法比较长，它包括有三种本地模式、本地集群模式、Standalone模式，以及第三方集群管理器（如YARN）提供的模式。
+* Create a task scheduler based on a given master URL.
+* Return a 2-tuple of the scheduler backend and the task scheduler.
+*/
+private def createTaskScheduler(
+  sc: SparkContext,
+  master: String,
+  deployMode: String): (SchedulerBackend, TaskScheduler) = {
+    import SparkMasterRegex._
+    
+    // When running locally, don't try to re-execute tasks on failure.
+    val MAX_LOCAL_TASK_FAILURES = 1
+    
+    master match {
+      case "local" =>
+        val scheduler = new TaskSchedulerImpl(sc, MAX_LOCAL_TASK_FAILURES, isLocal = true)
+        val backend = new LocalSchedulerBackend(sc.getConf, scheduler, 1)
+        scheduler.initialize(backend)
+        (backend, scheduler)
+    
+      case LOCAL_N_REGEX(threads) =>
+        def localCpuCount: Int = Runtime.getRuntime.availableProcessors()
+        // local[*] estimates the number of cores on the machine; local[N] uses exactly N threads.
+        val threadCount = if (threads == "*") localCpuCount else threads.toInt
+        if (threadCount <= 0) {
+          throw new SparkException(s"Asked to run locally with $threadCount threads")
+        }
+        val scheduler = new TaskSchedulerImpl(sc, MAX_LOCAL_TASK_FAILURES, isLocal = true)
+        val backend = new LocalSchedulerBackend(sc.getConf, scheduler, threadCount)
+        scheduler.initialize(backend)
+        (backend, scheduler)
+    
+      case LOCAL_N_FAILURES_REGEX(threads, maxFailures) =>
+        def localCpuCount: Int = Runtime.getRuntime.availableProcessors()
+        // local[*, M] means the number of cores on the computer with M failures
+        // local[N, M] means exactly N threads with M failures
+        val threadCount = if (threads == "*") localCpuCount else threads.toInt
+        val scheduler = new TaskSchedulerImpl(sc, maxFailures.toInt, isLocal = true)
+        val backend = new LocalSchedulerBackend(sc.getConf, scheduler, threadCount)
+        scheduler.initialize(backend)
+        (backend, scheduler)
+    
+      case SPARK_REGEX(sparkUrl) =>
+        val scheduler = new TaskSchedulerImpl(sc)
+        val masterUrls = sparkUrl.split(",").map("spark://" + _)
+        val backend = new StandaloneSchedulerBackend(scheduler, sc, masterUrls)
+        scheduler.initialize(backend)
+        (backend, scheduler)
+    
+      case LOCAL_CLUSTER_REGEX(numSlaves, coresPerSlave, memoryPerSlave) =>
+        // Check to make sure memory requested <= memoryPerSlave. Otherwise Spark will just hang.
+        val memoryPerSlaveInt = memoryPerSlave.toInt
+        if (sc.executorMemory > memoryPerSlaveInt) {
+          throw new SparkException("Asked to launch cluster with %d MB RAM / worker but requested %d MB/worker".format(memoryPerSlaveInt, sc.executorMemory))
+        }
+    
+        val scheduler = new TaskSchedulerImpl(sc)
+        val localCluster = new LocalSparkCluster(numSlaves.toInt, coresPerSlave.toInt, memoryPerSlaveInt, sc.conf)
+        val masterUrls = localCluster.start()
+        val backend = new StandaloneSchedulerBackend(scheduler, sc, masterUrls)
+        scheduler.initialize(backend)
+        backend.shutdownCallback = (backend: StandaloneSchedulerBackend) => {
+          localCluster.stop()
+        }
+        (backend, scheduler)
+    
+      case masterUrl =>
+        val cm = getClusterManager(masterUrl) match {
+          case Some(clusterMgr) => clusterMgr
+          case None => throw new SparkException("Could not parse Master URL: '" + master + "'")
+        }
+        try {
+          val scheduler = cm.createTaskScheduler(sc, masterUrl)
+          val backend = cm.createSchedulerBackend(sc, masterUrl, scheduler)
+          cm.initialize(scheduler, backend)
+          (backend, scheduler)
+        } catch {
+          case se: SparkException => throw se
+          case NonFatal(e) =>
+            throw new SparkException("External scheduler cannot be instantiated", e)
+        }
+    }
+}
+```
+##### org.apache.spark.scheduler.DAGScheduler
+DAGScheduler即有向无环图（DAG）调度器。<br/>
+用来表示RDD之间的血缘。<br/>
+DAGScheduler负责生成并提交Job，以及按照DAG将RDD和算子划分并提交Stage(按照宽依赖来划分Stage)。<br/>
+每个Stage都包含一组Task，称为TaskSet，它们被传递给TaskScheduler。也就是说DAGScheduler需要先于TaskScheduler进行调度。<br/>
+DAGScheduler初始化是直接new出来的，但在其构造方法里也会将SparkContext中TaskScheduler的引用传进去。因此要等DAGScheduler创建后，再真正启动TaskScheduler。其初始化代码如下：
+```scala
+_dagScheduler = new DAGScheduler(this)
+// start TaskScheduler after taskScheduler sets DAGScheduler reference in DAGScheduler's constructor
+_taskScheduler.start()
+```
+SchedulerBackend、TaskScheduler与DAGScheduler是Spark调度逻辑的主要组成部分。
+##### org.apache.spark.scheduler.EventLoggingListener
+EventLoggingListener是用于事件持久化的监听器。它可以通过 `spark.eventLog.enabled` 参数控制开关，默认值false。如果开启，它也会注册到LiveListenerBus里，并将特定的一部分事件写到磁盘。
+##### org.apache.spark.ExecutorAllocationManager
+ExecutorAllocationManager即Executor动态分配管理器。顾名思义，可以根据工作负载动态调整Executor的数量。在配置 `spark.dynamicallocation.enable` 为true的前提下，在非local模式下或者当 `spark.dynanicAllocation.testing` 属性为true时启用。<br/>
+如果开启，并且SchedulerBackend的实现类支持这种机制，Spark就会根据程序运行时的负载动态增减Executor的数量。
+其初始化代码如下：
+```scala
+// Optionally scale number of executors dynamically based on workload. Exposed for testing.
+val dynamicAllocationEnabled = Utils.isDynamicAllocationEnabled(_conf)
+_executorAllocationManager =
+  if (dynamicAllocationEnabled) {
+    schedulerBackend match {
+      case b: ExecutorAllocationClient =>
+        Some(new ExecutorAllocationManager(schedulerBackend.asInstanceOf[ExecutorAllocationClient], listenerBus, _conf,env.blockManager.master))
+      case _ =>
+        None
+    }
+  } else {
+    None
+  }
+_executorAllocationManager.foreach(_.start())
+```
+##### org.apache.spark.ContextCleaner
+上下文清理器。ContextCleaner实际采用异步的方式清理那些超出俎作用域范围的RDD、ShuffleDependency和Broadcast等信息。<br/>
+它可以通过spark.cleaner.referenceTracking参数控制开关，默认值true。它内部维护着对RDD、Shuffle依赖和广播变量（之后会提到）的弱引用，如果弱引用的对象超出程序的作用域，就异步地将它们清理掉。
+#### 2.SparkContext的主要组成部分
+* **JobProgressListener**：作业进度监听器。JobProgressListener将被注册到LiveListenerBus中作为事件监听器之一使用。
+* **org.apache.hadoop.util.ShutdownHookManager**：用于关闭程序时的钩子函数，这样可以在JVM退出的时候执行一些清理工作。
+#### 2.SparkContext的重要属性
+1. `private val creationSite: CallSite = Utils.getCallSite()`：其中保存着线程栈中最靠近栈顶的用户定义的类及最靠近栈底的Scala或者Spark核心类信息，CallSite的shortForm属性保存着以上信息的简短描述，CallSite的longForm属性则保存着以上信息的完整描述。
+2. `private val allowMultipleContexts: Boolean = config.getBoolean("spark.driver.allowMultipleContexts", false)`：是否允许多个SparkContext实例。默认为false，可以通过属性 `spark.driver.allowMultipleContext` 来控制。
+3. `val startTime = System.currentTimeMillis()`：SparkContext启动的时间戳
+4. `private[spark] val stopped: AtomicBoolean = new AtomicBoolean(false)`：标记SparkContext的状态是否已经停止，采用AtomicBoolean类型，保证原子性
+5. `private[spark] val addedFiles = new ConcurrentHashMap[String, Long]().asScala`：用于每个本地文件的URL与添加此文件到addedFiles时的时间戳之间的映射缓存。
+6. `private[spark] val addedJars = new ConcurrentHashMap[String, Long]().asScala`：用于每个本地Jar文件的URL与添加此文件到addedJars时的时间戳之间的映射缓存。
+7. `private[spark] val persistentRdds = {
+        val map: ConcurrentMap[Int, RDD[_]] = new MapMaker().weakValues().makeMap[Int, RDD[_]]()
+        map.asScala
+      }`：对所有持久化的RDD进行追踪。
+8. `private[spark] val executorEnvs = HashMap[String, String]()`：用户存储环境变量。executorEnvs中存储的变量将传递给执行任务的Executor使用。
+9. `val sparkUser = Utils.getCurrentUserName()`：当前运行SparkContext实例的用户
+10. `private[spark] var checkpointDir: Option[String] = None`：RDD计算过程中保存检查点所需要的目录
+11. `private var _conf: SparkConf = _ ; _conf = config.clone()`：SparkContext的配置信息，通过调用SparkConf的clone方法的克隆体。在SparkContext初始化过程中会对_conf中的配置信息做校验
+    * 例如：用户必须给自己的应用程序设置spark.master（采用的部署模式）和spark.app.name（用户应用的名称）；用户设置的spark.master属性为yarn时，spark.submit.deployMode属性必须为cluster且必须设置spark.yarn.app.id属性。
+12. `private var _jars: Seq[String] = _ ; _jars = Utils.getUserJars(_conf)`：用户设置的额外的jar包依赖，可以用 `--jars` 或 `spark.jars` 来指定额外的jar包
+13. `private var _files: Seq[String] = _ ; _files = _conf.getOption("spark.files").map(_.split(",")).map(_.filter(_.nonEmpty)).toSeq.flatten`：用户设置的额外文件，由 `--files` 或 `spark.files` 来指定文件
+14. `private var _executorMemory: Int = _ ; _executorMemory = _conf.getOption("spark.executor.memory")
+                                                  .orElse(Option(System.getenv("SPARK_EXECUTOR_MEMORY")))
+                                                  .orElse(Option(System.getenv("SPARK_MEM"))
+                                                  .map(warnSparkMem))
+                                                  .map(Utils.memoryStringToMb)
+                                                  .getOrElse(1024)`：Executor的内存大小，默认为1024MB。
+15. `private var _applicationId: String = _ ; _applicationId = _taskScheduler.applicationId()`：当前应用的标识。TaskScheduler启动后会创建应用标识，SparkContext从TaskScheduler中获取_applicationId属性
+16. `private var _applicationAttemptId: Option[String] = None ; _applicationAttemptId = taskScheduler.applicationAttemptId()`：当前应用尝试执行的标识。SparkDriver在执行时会多次尝试，每次尝试都会生成一个标识来代表应用尝试的身份。
+17. `private var _listenerBusStarted: Boolean = false`：LiveListenerBus是否已经启动的标识
+18. `private var _schedulerBackend: SchedulerBackend = _ ;`：资源调度的重要实现类，根据启动模式的不同来实例化不同的实例对象。如果master是standalone模式则实例化 `org.apache.spark.scheduler.cluster.StandaloneSchedulerBackend.StandaloneSchedulerBackend`
+19. `private val nextShuffleId = new AtomicInteger(0)`：用于生成下一个Shuffle身份标识，AtomicInteger保证原子安全
+20. `private val nextRddId = new AtomicInteger(0)`：用于生成下一个RDD身份标识，AtomicInteger保证原子安全
+#### 4.SparkContext会构建Spark的三大核心：DAGScheduler,TaskScheduler和SchedulerBackend
+>由于在RDD的一系操作中，**如果一些连续的操作都是窄依赖操作的话，那么它们的执行是可以并行的，这一系列操作会形成pipeline的形式去处理数据**，而宽依赖则不行。<br/>
+>Spark中的Stage的划分就是以宽依赖来划分的，将一个Job(一个Action操作会生成一个Job，有多少个Action就有多少个Job)划分成多个Stage，一个Stage里面的任务，被抽象成TaskSet，一个TaskSet中包含很多Task(一个Partition对应一个Task)，同一个Stage中的Task的操作逻辑是相同的，只是要处理的数据不同
+1. TaskScheduler
+    1. 创建TaskScheduler
+    ```scala
+    // Create and start the scheduler
+    //createTaskScheduler的具体事现参见org.apache.spark.SparkContext#createTaskScheduler
+    val (sched, ts) = SparkContext.createTaskScheduler(this, master, deployMode)
+    _schedulerBackend = sched
+    //创建TaskScheduler和DAGScheduler的顺序不能颠倒，DAGScheduler管理着TaskScheduler，DAGScheduler的创建依赖着TaskScheduler
+    _taskScheduler = ts
+    _dagScheduler = new DAGScheduler(this)
+    _heartbeatReceiver.ask[Boolean](TaskSchedulerIsSet)
+    ```
+2. TaskScheduler初始化机制：
+    1. 首相在SparkContext中调用createTaskScheduler方法，这个方法比较关键，createTaskScheduler这个方法会创建几个比较重要的对象： `org.apache.spark.scheduler.TaskSchedulerImpl`,`org.apache.spark.scheduler.SchedulerBackend`
+        1. `org.apache.spark.scheduler.TaskSchedulerImpl` 就是TaskScheduler，TaskSchedulerImpl底层依赖SchedulerBackend来工作
+        2. `org.apache.spark.scheduler.SchedulerBackend` ，在standalone模式下是具体的 `org.apache.spark.scheduler.cluster.StandaloneSchedulerBackend` 类，它接收TaskSchedulerImpl的控制，实际上负责与Master的注册、Executor的反向注册，把Task发送到Executor等操作
+        3. SchedulerPool
+2. DAGScheduler
+    1. 创建DAGScheduler
+    ```scala
+    _dagScheduler = new DAGScheduler(this)
+    //DAGScheduler类
+    private[spark] class DAGScheduler(
+        private[scheduler] val sc: SparkContext,
+        private[scheduler] val taskScheduler: TaskScheduler,
+        listenerBus: LiveListenerBus,
+        mapOutputTracker: MapOutputTrackerMaster,
+        blockManagerMaster: BlockManagerMaster,
+        env: SparkEnv,
+        clock: Clock = new SystemClock())
+      extends Logging {
+        //DAGScheduler的创建依赖taskScheduler
+        //需要事先创建好taskScheduler
+        def this(sc: SparkContext) = this(sc, sc.taskScheduler)
+        def this(sc: SparkContext, taskScheduler: TaskScheduler) = {
+          this(
+            sc,
+            taskScheduler,
+            sc.listenerBus,
+            sc.env.mapOutputTracker.asInstanceOf[MapOutputTrackerMaster],
+            sc.env.blockManager.master,
+            sc.env)
+        }
+    }
+    ```
+3. SchedulerBackend
+    1. 创建SchedulerBackend
+    ```scala
+    _schedulerBackend = sched
+    ```
 ## 算子
 预先输出的RDD，注意RDD中是不存数据的，只存运算的逻辑，RDD生成的Task来执行真正的计算
 ```java
