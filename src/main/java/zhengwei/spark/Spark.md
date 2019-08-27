@@ -518,14 +518,14 @@ private[spark] def  : AppStatusStore = _statusStore
 ```
 ##### org.apache.spark.SparkConf
 它其实算不上是SparkContext的一个初始化组件，因为它是构造SparkContext的时候传进来的。SparkContext会将传入的SparkConf克隆一份副本，之后会在副本上做校验(主要是AppName和Master的校验)，及添加其他必要参数(Dirver地址、应用ID等)。这样用户就不可以在修改配置项，以保证SparkConf在运行期的不变性。
-#### org.apache.spark.scheduler.LiveListenerBus
+##### org.apache.spark.scheduler.LiveListenerBus
 它是SparkContext中的事件总线，它异步的将事件源产生的事件( `org.apache.spark.scheduler.SparkListenerEvent` )投递给已经注册的监听器( `org.apache.spark.scheduler.SparkListener` ).Spark中广泛运用监听器模式，以适应集群状态下的分布式事件汇报。<br/>
 除了LiveListenerBus之外，Spark中还有很多事件总线，它们都继承自 `org.apache.spark.util.ListenerBus` 特质，事件总线式Spark底层重要的支撑组件。<br/>
 LiveListenerBus的初始化
 ```scala
 _listenerBus = new LiveListenerBus(_conf)
 ```
-#### org.apache.spark.status.AppStatusStore
+##### org.apache.spark.status.AppStatusStore
 它式提供Spark程序运行中各项监控指标的键值对化存储。Web UI中见到的数据指标基本都在存在这里。
 对AppStatusStore的初始化
 ```scala
@@ -733,40 +733,493 @@ _executorAllocationManager.foreach(_.start())
 ##### org.apache.spark.ContextCleaner
 上下文清理器。ContextCleaner实际采用异步的方式清理那些超出俎作用域范围的RDD、ShuffleDependency和Broadcast等信息。<br/>
 它可以通过spark.cleaner.referenceTracking参数控制开关，默认值true。它内部维护着对RDD、Shuffle依赖和广播变量（之后会提到）的弱引用，如果弱引用的对象超出程序的作用域，就异步地将它们清理掉。
-#### 2.SparkContext的主要组成部分
-* **JobProgressListener**：作业进度监听器。JobProgressListener将被注册到LiveListenerBus中作为事件监听器之一使用。
-* **org.apache.hadoop.util.ShutdownHookManager**：用于关闭程序时的钩子函数，这样可以在JVM退出的时候执行一些清理工作。
-#### 2.SparkContext的重要属性
-1. `private val creationSite: CallSite = Utils.getCallSite()`：其中保存着线程栈中最靠近栈顶的用户定义的类及最靠近栈底的Scala或者Spark核心类信息，CallSite的shortForm属性保存着以上信息的简短描述，CallSite的longForm属性则保存着以上信息的完整描述。
-2. `private val allowMultipleContexts: Boolean = config.getBoolean("spark.driver.allowMultipleContexts", false)`：是否允许多个SparkContext实例。默认为false，可以通过属性 `spark.driver.allowMultipleContext` 来控制。
-3. `val startTime = System.currentTimeMillis()`：SparkContext启动的时间戳
-4. `private[spark] val stopped: AtomicBoolean = new AtomicBoolean(false)`：标记SparkContext的状态是否已经停止，采用AtomicBoolean类型，保证原子性
-5. `private[spark] val addedFiles = new ConcurrentHashMap[String, Long]().asScala`：用于每个本地文件的URL与添加此文件到addedFiles时的时间戳之间的映射缓存。
-6. `private[spark] val addedJars = new ConcurrentHashMap[String, Long]().asScala`：用于每个本地Jar文件的URL与添加此文件到addedJars时的时间戳之间的映射缓存。
-7. `private[spark] val persistentRdds = {
-        val map: ConcurrentMap[Int, RDD[_]] = new MapMaker().weakValues().makeMap[Int, RDD[_]]()
-        map.asScala
-      }`：对所有持久化的RDD进行追踪。
-8. `private[spark] val executorEnvs = HashMap[String, String]()`：用户存储环境变量。executorEnvs中存储的变量将传递给执行任务的Executor使用。
-9. `val sparkUser = Utils.getCurrentUserName()`：当前运行SparkContext实例的用户
-10. `private[spark] var checkpointDir: Option[String] = None`：RDD计算过程中保存检查点所需要的目录
-11. `private var _conf: SparkConf = _ ; _conf = config.clone()`：SparkContext的配置信息，通过调用SparkConf的clone方法的克隆体。在SparkContext初始化过程中会对_conf中的配置信息做校验
-    * 例如：用户必须给自己的应用程序设置spark.master（采用的部署模式）和spark.app.name（用户应用的名称）；用户设置的spark.master属性为yarn时，spark.submit.deployMode属性必须为cluster且必须设置spark.yarn.app.id属性。
-12. `private var _jars: Seq[String] = _ ; _jars = Utils.getUserJars(_conf)`：用户设置的额外的jar包依赖，可以用 `--jars` 或 `spark.jars` 来指定额外的jar包
-13. `private var _files: Seq[String] = _ ; _files = _conf.getOption("spark.files").map(_.split(",")).map(_.filter(_.nonEmpty)).toSeq.flatten`：用户设置的额外文件，由 `--files` 或 `spark.files` 来指定文件
-14. `private var _executorMemory: Int = _ ; _executorMemory = _conf.getOption("spark.executor.memory")
-                                                  .orElse(Option(System.getenv("SPARK_EXECUTOR_MEMORY")))
-                                                  .orElse(Option(System.getenv("SPARK_MEM"))
-                                                  .map(warnSparkMem))
-                                                  .map(Utils.memoryStringToMb)
-                                                  .getOrElse(1024)`：Executor的内存大小，默认为1024MB。
-15. `private var _applicationId: String = _ ; _applicationId = _taskScheduler.applicationId()`：当前应用的标识。TaskScheduler启动后会创建应用标识，SparkContext从TaskScheduler中获取_applicationId属性
-16. `private var _applicationAttemptId: Option[String] = None ; _applicationAttemptId = taskScheduler.applicationAttemptId()`：当前应用尝试执行的标识。SparkDriver在执行时会多次尝试，每次尝试都会生成一个标识来代表应用尝试的身份。
-17. `private var _listenerBusStarted: Boolean = false`：LiveListenerBus是否已经启动的标识
-18. `private var _schedulerBackend: SchedulerBackend = _ ;`：资源调度的重要实现类，根据启动模式的不同来实例化不同的实例对象。如果master是standalone模式则实例化 `org.apache.spark.scheduler.cluster.StandaloneSchedulerBackend.StandaloneSchedulerBackend`
-19. `private val nextShuffleId = new AtomicInteger(0)`：用于生成下一个Shuffle身份标识，AtomicInteger保证原子安全
-20. `private val nextRddId = new AtomicInteger(0)`：用于生成下一个RDD身份标识，AtomicInteger保证原子安全
-#### 4.SparkContext会构建Spark的三大核心：DAGScheduler,TaskScheduler和SchedulerBackend
+#### 3.SparkContext的辅助属性
+##### creationSite
+creationSie用来描述了SparkContext在那里被创造了。它的数据类型是 `org.apache.spark.util.CallSite` 他的数据结构很简单，只有shirtForm和longForm这两个属性，用来描述代码的位置。其初始化代码如下：
+```scala
+// The call site where this SparkContext was constructed.
+private val creationSite: CallSite = Utils.getCallSite()
+```
+其中 `Utils.getCallSite()` 方法会遍历线程栈中，找到最后一个(靠近栈顶的)Spark方法调用，与最先一个(靠近栈底的)用户用户方法调用，把它们的完整描述和简短描述包装在CallSite中返回。
+##### allowMultipleContexts
+它指示一个JVM(即一个Application)中是否允许运行多个SparkContext实例。
+初始化代码如下：
+```scala
+private val allowMultipleContexts: Boolean = config.getBoolean("spark.driver.allowMultipleContexts", false)
+```
+它由 `spark.driver.allowMultipleContexts` 参数来控制，默认为 `false` 不允许一个JVM中有多个SparkContext实例。如果设置为 `true` 那么如果有多个SparkContext实例的话则会发出警告。
+##### startTime & stopped
+startTime指示SparkContext启动时的时间戳。stopped则指示SparkContext是否停止，它采用AtomicBoolean类型保证更新状态的原子性。其初始化代码如下：
+```scala
+val startTime = System.currentTimeMillis()
+//使用AtomicBoolean保证原子性
+private[spark] val stopped: AtomicBoolean = new AtomicBoolean(false)
+```
+##### addedFiles/addedJars & _files/_jars
+Spark支持提交应用时，附带用户自定义的其他文件和jar包，addedFiles和addedJars是两个ConcurrentHashMap，用来维护用户自定义以及jar包的URL路径和它们被加入到ConcurrentHashMap的时间戳。其代码如下：
+```scala
+// Used to store a URL for each static file/jar together with the file's local timestamp
+private[spark] val addedFiles = new ConcurrentHashMap[String, Long]().asScala
+private[spark] val addedJars = new ConcurrentHashMap[String, Long]().asScala
+```
+_files和_jars则接收Spark配置中定义的文件或jar包路径，获取文件的逻辑相同。其代码如下：
+```scala
+_jars = Utils.getUserJars(_conf)
+/**
+* Return the jar files pointed by the "spark.jars" property. Spark internally will distribute
+* these jars through file server. In the YARN mode, it will return an empty list, since YARN
+* has its own mechanism to distribute jars.
+*/
+def getUserJars(conf: SparkConf): Seq[String] = {
+    val sparkJars = conf.getOption("spark.jars")
+    sparkJars.map(_.split(",")).map(_.filter(_.nonEmpty)).toSeq.flatten
+}
+_files = _conf.getOption("spark.files").map(_.split(",")).map(_.filter(_.nonEmpty)).toSeq.flatten
+```
+可以看出_files和_jars分别接收 `spark.files`( `--files` ) 和 `spark.jars`( `--jars` ) 配置的参数，首先使用 `Utils.getUserJars` 获取SparkConf中 `spark.jars` 和 `spark.jars` 配置信息，然后分别调用添加方法，对于jar包则是调用 `org.apache.spark.SparkContext.addJar` 方法。
+```scala
+/**
+* Adds a JAR dependency for all tasks to be executed on this `SparkContext` in the future.
+*
+* If a jar is added during execution, it will not be available until the next TaskSet starts.
+*
+* @param path can be either a local file, a file in HDFS (or other Hadoop-supported filesystems),
+* an HTTP, HTTPS or FTP URI, or local:/path for a file on every worker node.
+*
+* @note A path can be added only once. Subsequent additions of the same path are ignored.
+*/
+def addJar(path: String) {
+    def addJarFile(file: File): String = {
+      try {
+        if (!file.exists()) {
+          throw new FileNotFoundException(s"Jar ${file.getAbsolutePath} not found")
+        }
+        if (file.isDirectory) {
+          throw new IllegalArgumentException(
+            s"Directory ${file.getAbsoluteFile} is not allowed for addJar")
+        }
+        //添加到RPC环境中
+        env.rpcEnv.fileServer.addJar(file)
+      } catch {
+        case NonFatal(e) =>
+          logError(s"Failed to add $path to Spark environment", e)
+          null
+      }
+    }
+    if (path == null) {
+      logWarning("null specified as parameter to addJar")
+    } else {
+      val key = if (path.contains("\\")) {
+        // For local paths with backslashes on Windows, URI throws an exception
+        addJarFile(new File(path))
+      } else {
+        val uri = new URI(path)
+        // SPARK-17650: Make sure this is a valid URL before adding it to the list of dependencies
+        Utils.validateURL(uri)
+        uri.getScheme match {
+          // A JAR file which exists only on the driver node
+          case null =>
+            // SPARK-22585 path without schema is not url encoded
+            addJarFile(new File(uri.getRawPath))
+          // A JAR file which exists only on the driver node
+          case "file" => addJarFile(new File(uri.getPath))
+          // A JAR file which exists locally on every worker node
+          case "local" => "file:" + uri.getPath
+          case _ => path
+        }
+      }
+      if (key != null) {
+        val timestamp = System.currentTimeMillis
+        if (addedJars.putIfAbsent(key, timestamp).isEmpty) {
+          logInfo(s"Added JAR $path at $key with timestamp $timestamp")
+          postEnvironmentUpdate()
+        } else {
+          logWarning(s"The jar $path has been added already. Overwriting of added jars " +
+            "is not supported in the current version.")
+        }
+      }
+    }
+}
+```
+addJar()方法检查JAR包路径的合法性和类型，然后调用RpcEnv中的RpcEnvFileServer.addJar()方法，将JAR包加进RPC环境中。在该方法的最后还调用了postEnvironmentUpdate()，用来更新执行环境。
+##### persistentRdds
+Spark支持RDD的持久化，可以持久化到磁盘或内存。persistentRdds维护的是持久化RDD的ID与其弱引用的映射关系。其初始化代码如下：
+```scala
+private[spark] val persistentRdds = {
+    val map: ConcurrentMap[Int, RDD[_]] = new MapMaker().weakValues().makeMap[Int, RDD[_]]()
+    map.asScala
+}
+```
+通过RDD自带的 `cache()/persist()/unpersist()` 方法可以持久化与反持久化一个RDD，它们最终调用了 `org.apache.spark.SparkContext.persistRDD(rdd: RDD[_])` 和 `org.apache.spark.SparkContext.unpersistRDD(rddId: Int, blocking: Boolean = true)` 内部代码，其带啊吗如下：
+```scala
+  /**
+   * Register an RDD to be persisted in memory and/or disk storage
+   */
+  private[spark] def persistRDD(rdd: RDD[_]) {
+    persistentRdds(rdd.id) = rdd
+  }
+
+  /**
+   * Unpersist an RDD from memory and/or disk storage
+   */
+  private[spark] def unpersistRDD(rddId: Int, blocking: Boolean = true) {
+    env.blockManager.master.removeRdd(rddId, blocking)
+    persistentRdds.remove(rddId)
+    listenerBus.post(SparkListenerUnpersistRDD(rddId))
+  }
+```
+##### executorEnvs & _executorMemory & _sparkUser
+executorEnvs是一个HashMap，用来存储需要传递给Executor的环境变量，executorEnvs中存储的变量将传递给执行任务的Executor使用。_executorMemory与_sparkUser就是其中之二，分别代表Executor内存大小和当前启动SparkContext的用户名。其初始化代码如下：
+```scala
+private[spark] val executorEnvs = HashMap[String, String]()
+//Executor内存可以通过spark.executor.memory配置项、SPARK_EXECUTOR_MEMORY环境变量、SPARK_MEM环境变量指定，优先级依次降低，且默认大小是1GB1024MB。
+_executorMemory = _conf.getOption("spark.executor.memory")
+                       .orElse(Option(System.getenv("SPARK_EXECUTOR_MEMORY")))
+                       .orElse(Option(System.getenv("SPARK_MEM"))
+                       .map(warnSparkMem))
+                       .map(Utils.memoryStringToMb)
+                       .getOrElse(1024)
+val sparkUser = Utils.getCurrentUserName()
+//executorEnvs也会存储_executorMemory和_sparkUser
+executorEnvs("SPARK_EXECUTOR_MEMORY") = executorMemory + "m"
+executorEnvs ++= _conf.getExecutorEnv
+executorEnvs("SPARK_USER") = sparkUser
+```
+##### checkpointDir
+checkpointDir指定集群状态下，RDD检查点在HDFS上的保存路径。检查点的存在是为了当计算过程中出错时，能够快速恢复，而不必从头计算。SparkContext提供 `setCheckpointDir()` 方法来设定检查点。代码如下：
+```scala
+  private[spark] var checkpointDir: Option[String] = None
+  /**
+   * Set the directory under which RDDs are going to be checkpointed.
+   * @param directory path to the directory where checkpoint files will be stored
+   * (must be HDFS path if running in cluster)
+   */
+  def setCheckpointDir(directory: String) {
+
+    // If we are running on a cluster, log a warning if the directory is local.
+    // Otherwise, the driver may attempt to reconstruct the checkpointed RDD from
+    // its own local file system, which is incorrect because the checkpoint files
+    // are actually on the executor machines.
+    if (!isLocal && Utils.nonLocalPaths(directory).isEmpty) {
+      logWarning("Spark is not running in local mode, therefore the checkpoint directory " +
+        s"must not be on the local filesystem. Directory '$directory' " +
+        "appears to be on the local filesystem.")
+    }
+
+    checkpointDir = Option(directory).map { dir =>
+      val path = new Path(dir, UUID.randomUUID().toString)
+      val fs = path.getFileSystem(hadoopConfiguration)
+      fs.mkdirs(path)
+      fs.getFileStatus(path).getPath.toString
+    }
+  }
+```
+##### localProperties
+localProperties用于维护一个Properties数据类型的线程本地变量。它是InheritableThreadLocal类型，继承自ThreadLocal，在后者的基础上允许本地变量从父线程到子线程的继承，也就是该Properties会沿着线程栈传递下去。
+##### _eventLogDir & _eventLogCodec
+这两个属性与EventLoggingListener相关。<br/>
+EventLoggingListener打开时，事件日志会写入_eventLogDir指定的目录，可以用 `spark.eventLog.dir` 参数设置。<br/>
+_eventLogCodec指定事件日志的压缩算法，当通过 `spark.eventLog.compress` 参数启用压缩后，就根据 `spark.io.compression.codec` 参数配置压缩算法，目前支持lz4、lzf、snappy、zstd四种。
+##### _applicationId & _applicationAttemptId
+这两个ID都是TaskScheduler初始化完毕并启动之后才分配的。TaskScheduler启动之后，应用代码的逻辑才真正被执行，并且可能会进行多次尝试。在SparkUI、BlockManager和EventLoggingListener初始化时，也会用到它们。其初始化代码如下：
+```scala
+_applicationId = _taskScheduler.applicationId()
+_applicationAttemptId = taskScheduler.applicationAttemptId()
+```
+##### _shutdownHookRef
+它用来定义SparkContext的关闭钩子，主要是在JVM退出时，显式地执行SparkContext.stop()方法，以防止用户忘记而留下烂摊子。初始化代码如下：
+```scala
+_shutdownHookRef = ShutdownHookManager.addShutdownHook(
+  ShutdownHookManager.SPARK_CONTEXT_SHUTDOWN_PRIORITY) { () =>
+  logInfo("Invoking stop() from shutdown hook")
+  try {
+    stop()
+  } catch {
+    case e: Throwable =>
+      logWarning("Ignoring Exception while stopping SparkContext from shutdown hook", e)
+  }
+}
+```
+##### nextShuffleId & nextRddId
+这两个ID都是AtomicInteger类型保证原子性。Shuffle和RDD都需要唯一ID来进行标识，并且它们是递增的。初始化代码如下：
+```scala
+private val nextShuffleId = new AtomicInteger(0)
+private val nextRddId = new AtomicInteger(0)
+```
+#### 4.SparkContext后置初始化
+在SparkContext初始化中，在初始化的尾声阶段，在ContextCleaner初始化完毕之后，还有一小部分逻辑，其代码如下：
+```scala
+    setupAndStartListenerBus()
+    postEnvironmentUpdate()
+    postApplicationStart()
+
+    // Post init
+    //等待SchedulerBackend初始化完毕
+    _taskScheduler.postStartHook()
+    //在度量系统注册DAGScheduler、BlockManager、ExecutorAllocationManager的度量源，以收集它们的监控指标
+    _env.metricsSystem.registerSource(_dagScheduler.metricsSource)
+    _env.metricsSystem.registerSource(new BlockManagerSource(_env.blockManager))
+    _executorAllocationManager.foreach { e =>
+      _env.metricsSystem.registerSource(e.executorAllocationManagerSource)
+    }
+
+    // Make sure the context is stopped if the user forgets about it. This avoids leaving
+    // unfinished event logs around after the JVM exits cleanly. It doesn't help if the JVM
+    // is killed, though.
+    logDebug("Adding shutdown hook") // force eager creation of logger
+    //添加关闭钩子
+    _shutdownHookRef = ShutdownHookManager.addShutdownHook(
+      ShutdownHookManager.SPARK_CONTEXT_SHUTDOWN_PRIORITY) { () =>
+      logInfo("Invoking stop() from shutdown hook")
+      try {
+        stop()
+      } catch {
+        case e: Throwable =>
+          logWarning("Ignoring Exception while stopping SparkContext from shutdown hook", e)
+      }
+    }
+  //标记SparkContext为活动状态
+  SparkContext.setActiveContext(this, allowMultipleContexts)
+```
+主要的逻辑在开头的三个方法里面。<br/>
+**_org.apache.spark.SparkContext#setupAndStartListenerBus_**代码如下：
+```scala
+  /**
+   * Registers listeners specified in spark.extraListeners, then starts the listener bus.
+   * This should be called after all internal listeners have been registered with the listener bus
+   * (e.g. after the web UI and event logging listeners have been registered).
+   */
+  private def setupAndStartListenerBus(): Unit = {
+    try {
+      conf.get(EXTRA_LISTENERS).foreach { classNames =>
+        //通过反射监听器
+        val listeners = Utils.loadExtensions(classOf[SparkListenerInterface], classNames, conf)
+        listeners.foreach { listener =>
+          //注册到LiveListenerBus中
+          listenerBus.addToSharedQueue(listener)
+          logInfo(s"Registered listener ${listener.getClass().getName()}")
+        }
+      }
+    } catch {
+      case e: Exception =>
+        try {
+          stop()
+        } finally {
+          throw new SparkException(s"Exception when registering SparkListener", e)
+        }
+    }
+
+    listenerBus.start(this, _env.metricsSystem)
+    _listenerBusStarted = true
+  }
+```
+这个方法用于注册自定义的监听器，并最终启动LiveListenerBus。<br/>
+自定义监听器都实现了SparkListener特质，通过 `spark.extraListeners` 配置参数来指定。<br/>
+然后调用Utils.loadExtensions()方法，通过反射来构建自定义监听器的实例，并将它们注册到LiveListenerBus。
+**_org.apache.spark.SparkContext#postEnvironmentUpdate_**方法如下：
+```scala
+  /** Post the environment update event once the task scheduler is ready */
+  private def postEnvironmentUpdate() {
+    if (taskScheduler != null) {
+      //获取调度方式
+      val schedulingMode = getSchedulingMode.toString
+      //获得jar列表
+      val addedJarPaths = addedJars.keys.toSeq
+      //获得文件列表
+      val addedFilePaths = addedFiles.keys.toSeq
+      //一些环境细节
+      val environmentDetails = SparkEnv.environmentDetails(conf, schedulingMode, addedJarPaths, addedFilePaths)
+      //封装成SparkListenerEnvironmentUpdate事件
+      val environmentUpdate = SparkListenerEnvironmentUpdate(environmentDetails)
+      //推送到事件总线LiveListenerBus中
+      listenerBus.post(environmentUpdate)
+    }
+  }
+```
+该方法在添加自定义文件和JAR包时也都有调用，因为添加的资源会对程序的执行环境造成影响。<br/>
+它会取得当前的自定义文件和JAR包列表，以及Spark配置、调度方式，然后通过SparkEnv.environmentDetails()方法再取得JVM参数、Java系统属性等，一同封装成SparkListenerEnvironmentUpdate事件，并投递给事件总线。
+**_org.apache.spark.SparkContext#postApplicationStart_**方法代码如下：
+```scala
+  /** Post the application start event */
+  private def postApplicationStart() {
+    // Note: this code assumes that the task scheduler has been initialized and has contacted
+    // the cluster manager to get an application ID (in case the cluster manager provides one).
+    listenerBus.post(SparkListenerApplicationStart(appName, Some(applicationId),
+      startTime, sparkUser, applicationAttemptId, schedulerBackend.getDriverLogUrls))
+  }
+```
+向事件总线投递SparkListenerApplicationStart事件，表示Application已经启动。
+#### 5.SparkContext中提供的其他功能
+##### 1.生成RDD
+对于生成RDD，有两种方式，一种是对在内存中的数据执行并行化(parallelize)操作，另一种是从外部存储系统中读取数据之后生成RDD。这两类方法都在SparkContext中。
+###### 1.parallelize
+对于SparkCotext中的parallelize方法代码如下：
+```scala
+  def parallelize[T: ClassTag](
+      seq: Seq[T],
+      numSlices: Int = defaultParallelism): RDD[T] = withScope {
+    assertNotStopped()
+    new ParallelCollectionRDD[T](this, seq, numSlices, Map[Int, Seq[String]]())
+  }
+```
+该方法生成的RDD类型是ParallelCollectionRDD，numslices指定了RDD中有多少个分区。默认与TaskScheduler的Task的并行度相同(默认最小的分区是2)。
+###### 2.从外部文件系统中读取
+这里只看用的最多的方法textFile方法。textFile和hadoopFile代码如下：
+```scala
+  def textFile(
+      path: String,
+      minPartitions: Int = defaultMinPartitions): RDD[String] = withScope {
+    assertNotStopped()
+    //使用TextInputFormat来接收读到的文件中的数据，使用LongWritable来接收文件内容的偏移量
+    hadoopFile(path, classOf[TextInputFormat], classOf[LongWritable], classOf[Text], minPartitions).map(pair => pair._2.toString).setName(path)
+  }
+  def hadoopFile[K, V](
+      path: String,
+      inputFormatClass: Class[_ <: InputFormat[K, V]],
+      keyClass: Class[K],
+      valueClass: Class[V],
+      minPartitions: Int = defaultMinPartitions): RDD[(K, V)] = withScope {
+    assertNotStopped()
+    // This is a hack to enforce loading hdfs-site.xml.
+    // See SPARK-11227 for details.
+    FileSystem.getLocal(hadoopConfiguration)
+    // A Hadoop configuration can be about 10 KB, which is pretty big, so broadcast it.
+    val confBroadcast = broadcast(new SerializableConfiguration(hadoopConfiguration))
+    val setInputPathsFunc = (jobConf: JobConf) => FileInputFormat.setInputPaths(jobConf, path)
+    new HadoopRDD(
+      this,
+      confBroadcast,
+      Some(setInputPathsFunc),
+      inputFormatClass,
+      keyClass,
+      valueClass,
+      minPartitions).setName(path)
+  }
+```
+textFile最终生成的是HadoopRDD，HadoopRDD是KV形式的pair RDD，K中存储着读入文件的偏移量，V中存储着一行一行的文件内容，然后textFile只提取出V中的文本值。
+##### 2.广播变量
+广播变量是Spark两种共享变量中的一种。所谓广播，就是Driver直接向每个Worker节点发送同一份数据的只读副本，而不像通常一样通过Task来计算。<br/>
+广播变量适合处理多节点跨Stage的共享数据，特别是输入数据量较大的集合，可以提高效率。广播变量是Spark两种共享变量中的一种。<br/>
+所谓广播，就是Driver直接向每个Worker节点发送同一份数据的只读副本，而不像通常一样通过Task来计算。广播变量适合处理多节点跨Stage的共享数据，特别是输入数据量较大的集合，可以提高效率。
+```scala
+  def broadcast[T: ClassTag](value: T): Broadcast[T] = {
+    assertNotStopped()
+    require(!classOf[RDD[_]].isAssignableFrom(classTag[T].runtimeClass),
+      "Can not directly broadcast RDDs; instead, call collect() and broadcast the result.")
+    val bc = env.broadcastManager.newBroadcast[T](value, isLocal)
+    val callSite = getCallSite
+    logInfo("Created broadcast " + bc.id + " from " + callSite.shortForm)
+    cleaner.foreach(_.registerBroadcastForCleanup(bc))
+    bc
+  }
+```
+广播变量的产生依赖于Spark执行环境里面的广播变量管理器BroadcastManager。
+##### 3.累加器
+累加器与广播变量一样，也是Spark的共享变量。<br/>
+顾名思义，累加器就是一个能够累积结果值的变量，最常见的用途是做计数。它在Driver端创建和读取，Executor端（也就是各个Task）只能做累加操作。SparkContext已经提供了数值型累加器的创建方法，如长整型的LongAccumulator。
+```scala
+  /**
+   * Create and register a long accumulator, which starts with 0 and accumulates inputs by `add`.
+   */
+  def longAccumulator: LongAccumulator = {
+    val acc = new LongAccumulator
+    register(acc)
+    acc
+  }
+  /**
+   * Create and register a long accumulator, which starts with 0 and accumulates inputs by `add`.
+   */
+  def longAccumulator(name: String): LongAccumulator = {
+    val acc = new LongAccumulator
+    register(acc, name)
+    acc
+  }
+```
+所有累加器的基类都是AccumulatorV2抽象类，我们也可以自定义其他类型的累加器。特征AccumulatorParam则用于封装累加器对应的数据类型及累加操作。
+##### 4.runJob
+SparkContext提供很多种runJob()方法的重载来运行一个Job，也就是触发RDD行动算子的执行。归根结底，所有runJob()方法的重载都会调用如下逻辑：
+```scala
+  def runJob[T, U: ClassTag](
+      rdd: RDD[T],
+      func: (TaskContext, Iterator[T]) => U,
+      partitions: Seq[Int],
+      resultHandler: (Int, U) => Unit): Unit = {
+    if (stopped.get()) {
+      throw new IllegalStateException("SparkContext has been shutdown")
+    }
+    val callSite = getCallSite
+    val cleanedFunc = clean(func)
+    logInfo("Starting job: " + callSite.shortForm)
+    if (conf.getBoolean("spark.logLineage", false)) {
+      logInfo("RDD's recursive dependencies:\n" + rdd.toDebugString)
+    }
+    dagScheduler.runJob(rdd, cleanedFunc, partitions, callSite, resultHandler, localProperties.get)
+    progressBar.foreach(_.finishAll())
+    rdd.doCheckpoint()
+  }
+```
+可见，它最终调用了DAGScheduler中的runJob方法来运行Job。它会将需要计算的RDD及其分区列表传入，在计算完成后，将结果传回给resultHandler回调方法。在运行Job的同时，还会对RDD本身保存检查点。
+##### 5.SparkContext伴生对象
+###### SparkContext伴生对象的属性
+创建TaskScheduler的方法 `org.apache.spark.SparkContext#createTaskScheduler` 就在SparkContext的伴生对象中。除了它之外，伴生对象主要用来跟踪并维护SparkContext的创建与激活。SparkContext的伴生对象有如下属性：
+```scala
+private val SPARK_CONTEXT_CONSTRUCTOR_LOCK = new Object()
+private val activeContext: AtomicReference[SparkContext] = new AtomicReference[SparkContext](null)
+private var contextBeingConstructed: Option[SparkContext] = None
+```
+这三个对象都与SparkContext的创建有关。SPARK_CONTEXT_CONSTRUCTOR_LOCK是SparkContext构造过程中使用的锁对象，用来保证线程安全。<br/>
+activeContext用来标记该SparkContext的活动状态。<br/>
+contextBeingConstructed用来保存正在创建的SparkContext。
+###### markPartiallyConstructed()方法
+这个方法实际上在SparkContext主构造方法中就被调用了，它将当前的SparkContext标记为正在创建。其代码如下：
+```scala
+  private[spark] def markPartiallyConstructed(
+      sc: SparkContext,
+      allowMultipleContexts: Boolean): Unit = {
+    SPARK_CONTEXT_CONSTRUCTOR_LOCK.synchronized {
+      assertNoOtherContextIsRunning(sc, allowMultipleContexts)
+      contextBeingConstructed = Some(sc)
+    }
+  }
+```
+可见最终调用了assertNoOtherContextIsRunning方法，这是一个私有方法，它检测当前是否有多个SparkContext实例在运行。并根据 `spark.driver.allowMultipleContexts` 参数的设置抛出异常或输出警告。
+###### 6.setActiveContext()方法
+这个方法在SparkContext的主构造方法的末尾处调用，将当前SparkContext标记为已激活。
+```scala
+  private[spark] def setActiveContext(
+      sc: SparkContext,
+      allowMultipleContexts: Boolean): Unit = {
+    SPARK_CONTEXT_CONSTRUCTOR_LOCK.synchronized {
+      assertNoOtherContextIsRunning(sc, allowMultipleContexts)
+      contextBeingConstructed = None
+      //激活SparkContext
+      activeContext.set(sc)
+    }
+  }
+```
+###### 7.getOrCreate()方法
+该方法是除 `new Spark()` 之外，另一种更好的创建SparkContext的途径。它会检查当前是否已经存在了一个已激活的SparkContext，如果有则则复用，没有则创建。
+```scala
+  def getOrCreate(config: SparkConf): SparkContext = {
+    // Synchronize to ensure that multiple create requests don't trigger an exception
+    // from assertNoOtherContextIsRunning within setActiveContext
+    SPARK_CONTEXT_CONSTRUCTOR_LOCK.synchronized {
+      if (activeContext.get() == null) {
+        setActiveContext(new SparkContext(config), allowMultipleContexts = false)
+      } else {
+        if (config.getAll.nonEmpty) {
+          logWarning("Using an existing SparkContext; some configuration may not take effect.")
+        }
+      }
+      activeContext.get()
+    }
+  }
+```
+#### 6.SparkContext中核心组件
+##### 1.事件总线以及ListenerBus
+SparkContext在初始化的时候，第一个初始化的组件就是事件总线LiveListenerBus。后面的很多组件都会依赖它，它是SparkContext中很重要的组件。
+###### 1.总线概览
+
 >由于在RDD的一系操作中，**如果一些连续的操作都是窄依赖操作的话，那么它们的执行是可以并行的，这一系列操作会形成pipeline的形式去处理数据**，而宽依赖则不行。<br/>
 >Spark中的Stage的划分就是以宽依赖来划分的，将一个Job(一个Action操作会生成一个Job，有多少个Action就有多少个Job)划分成多个Stage，一个Stage里面的任务，被抽象成TaskSet，一个TaskSet中包含很多Task(一个Partition对应一个Task)，同一个Stage中的Task的操作逻辑是相同的，只是要处理的数据不同
 1. TaskScheduler
