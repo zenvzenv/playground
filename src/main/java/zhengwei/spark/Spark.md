@@ -1219,7 +1219,165 @@ contextBeingConstructed用来保存正在创建的SparkContext。
 ##### 1.事件总线以及ListenerBus
 SparkContext在初始化的时候，第一个初始化的组件就是事件总线LiveListenerBus。后面的很多组件都会依赖它，它是SparkContext中很重要的组件。
 ###### 1.总线概览
-
+监听器注册到ListenerBus事件总线上，事件被投递到ListenerBus中，ListenerBus找到处理该事件的对应的监听器上，然后监听器去处理相关事件。<br/>
+所有监听器的基类都是ListenerBus特质，以下是ListenerBus的类继承关系：
+```text
+ListenerBus(org.apache.spark.util.ListenerBus)
+    ExternalCatalogWithListener (org.apache.spark.sql.catalyst.catalog)
+    StreamingListenerBus (org.apache.spark.streaming.scheduler)
+    StreamingQueryListenerBus (org.apache.spark.sql.execution.streaming)
+    SparkListenerBus (org.apache.spark.scheduler)
+        AsyncEventQueue (org.apache.spark.scheduler)
+        ReplayListenerBus (org.apache.spark.scheduler)
+```
+###### 2.ListenerBus特质
+ListenerBus特质含有两个泛型L和E。L代表监听器的类型，并且它可以是任意类型。E则代表事件的类型。
+```scala
+private[spark] trait ListenerBus[L <: AnyRef, E] extends Logging {
+  //维护了所有注册在事件总线上d的监听器以及它们对应的计时器的二元组，计时器是可选的，用来指示监听器处理事件的时间。
+  //它采用了CopyOnWriteArrayList并发容器，以保证x线程安全和支持b并发修改。
+  private[this] val listenersPlusTimers = new CopyOnWriteArrayList[(L, Option[Timer])]
+  /**
+   * Returns a CodaHale metrics Timer for measuring the listener's event processing time.
+   * This method is intended to be overridden by subclasses.
+   * 将listenersPlusTimers中的监听器单独取出来，转成java.util.List[L]类型。
+   */
+  private[spark] def listeners = listenersPlusTimers.asScala.map(_._1).asJava
+}
+```
+###### 3.重要方法
+1. addListener() & removeListener()
+```scala
+  /**
+   * Add a listener to listen events. This method is thread-safe and can be called in any thread.
+   * 往事件总线中添加监听器，这个方法是线程安全的(因为是直接在CopyOnWriteArrayList上操作)，可以在任何线程中去调用它
+   */
+  final def addListener(listener: L): Unit = {
+    listenersPlusTimers.add((listener, getTimer(listener)))
+  }
+  /**
+   * Remove a listener and it won't receive any events. This method is thread-safe and can be called
+   * in any thread.
+   * 从事件总线中移除监听器，这个方法也是线程安全的(因为是直接在CopyOnWriteArrayList上操作)，可以在任何线程中调用
+   */
+  final def removeListener(listener: L): Unit = {
+    listenersPlusTimers.asScala.find(_._1 eq listener).foreach { listenerAndTimer =>
+      listenersPlusTimers.remove(listenerAndTimer)
+    }
+  }
+```
+顾名思义，这两个方法分别向事件总线中注册监听器与移除监听器。它们都是直接在CopyOnWriteArrayList上操作，因此是线程安全的。
+2. doPostEvent()
+```scala
+  /**
+   * Post an event to the specified listener. `onPostEvent` is guaranteed to be called in the same
+   * thread for all listeners.
+   */
+  protected def doPostEvent(listener: L, event: E): Unit
+```
+这个方法是将事件event投递给监听器listener进行处理，此处只提供定义，具体由子类去实现。
+3. postToAll()
+```scala
+  /**
+   * Post the event to all registered listeners. The `postToAll` caller should guarantee calling
+   * `postToAll` in the same thread for all events.
+   */
+  def postToAll(event: E): Unit = {
+    // JavaConverters can create a JIterableWrapper if we use asScala.
+    // However, this method will be called frequently. To avoid the wrapper cost, here we use
+    // Java Iterator directly.
+    val iter = listenersPlusTimers.iterator
+    while (iter.hasNext) {
+      val listenerAndMaybeTimer = iter.next()
+      val listener = listenerAndMaybeTimer._1
+      val maybeTimer = listenerAndMaybeTimer._2
+      val maybeTimerContext = if (maybeTimer.isDefined) {
+        maybeTimer.get.time()
+      } else {
+        null
+      }
+      try {
+        //将事件投递给已经注册的监听器
+        doPostEvent(listener, event)
+        if (Thread.interrupted()) {
+          // We want to throw the InterruptedException right away so we can associate the interrupt
+          // with this listener, as opposed to waiting for a queue.take() etc. to detect it.
+          throw new InterruptedException()
+        }
+      } catch {
+        case ie: InterruptedException =>
+          logError(s"Interrupted while posting to ${Utils.getFormattedClassName(listener)}.  " +
+            s"Removing that listener.", ie)
+          removeListenerOnError(listener)
+        case NonFatal(e) if !isIgnorableException(e) =>
+          logError(s"Listener ${Utils.getFormattedClassName(listener)} threw an exception", e)
+      } finally {
+        if (maybeTimerContext != null) {
+          maybeTimerContext.stop()
+        }
+      }
+    }
+  }
+```
+这个方法通过调用doPostEvent()方法，将事件event投递给所有已注册的监听器。需要注意它是线程不安全的，因此调用方需要保证同时只有一个线程调用它。
+###### 4.SparkListenerBus特质
+SparkListenerBus特质是Spark Core内部事件总线的基类，其代码如下：
+```scala
+private[spark] trait SparkListenerBus
+  extends ListenerBus[SparkListenerInterface, SparkListenerEvent] {
+protected override def doPostEvent(
+      listener: SparkListenerInterface,
+      event: SparkListenerEvent): Unit = {
+    event match {
+      case stageSubmitted: SparkListenerStageSubmitted =>
+        listener.onStageSubmitted(stageSubmitted)
+      case stageCompleted: SparkListenerStageCompleted =>
+        listener.onStageCompleted(stageCompleted)
+      ......
+      case speculativeTaskSubmitted: SparkListenerSpeculativeTaskSubmitted =>
+        listener.onSpeculativeTaskSubmitted(speculativeTaskSubmitted)
+      case _ => listener.onOtherEvent(event)
+  }
+}
+```
+SparkListenerBus继承了ListenerBus，实现了doPostEvent()方法，对事件进行匹配，并调用监听器的处理方法，如果匹配不到则调用onOtherEvent()方法。
+SparkListener支持的监听器都是 `org.apache.spark.scheduler.SparkListenerInterface` 的子类，事件则是 `org.apache.spark.scheduler.SparkListenerEvent` 特质的子类。
+###### 5.SparkListenerInterface & SparkListenerEvent特质
+在SparkListenerInterface特征中，分别定义了处理每一个事件的处理方法，统一命名为“on+事件名称”，代码很简单，就不再贴出来了。<br/>
+SparkListenerEvent是一个没有抽象方法的特征，类似于Java中的标记接口(marker interface)，它唯一的用途就是标记具体的事件类。事件类统一命名为“SparkListener+事件名称”，并且都是Scala样例类。我们可以简单看一下它们的部分代码。
+```scala
+@DeveloperApi
+@JsonTypeInfo(use = JsonTypeInfo.Id.CLASS, include = JsonTypeInfo.As.PROPERTY, property = "Event")
+trait SparkListenerEvent {
+  protected[spark] def logEvent: Boolean = true
+}
+@DeveloperApi
+case class SparkListenerTaskStart(stageId: Int, stageAttemptId: Int, taskInfo: TaskInfo)
+  extends SparkListenerEvent
+@DeveloperApi
+case class SparkListenerTaskGettingResult(taskInfo: TaskInfo) extends SparkListenerEvent
+@DeveloperApi
+case class SparkListenerSpeculativeTaskSubmitted(stageId: Int) extends SparkListenerEvent
+@DeveloperApi
+case class SparkListenerTaskEnd(
+    stageId: Int,
+    stageAttemptId: Int,
+    taskType: String,
+    reason: TaskEndReason,
+    taskInfo: TaskInfo,
+    @Nullable taskMetrics: TaskMetrics)
+  extends SparkListenerEvent
+@DeveloperApi
+case class SparkListenerJobStart(
+    jobId: Int,
+    time: Long,
+    stageInfos: Seq[StageInfo],
+    properties: Properties = null)
+  extends SparkListenerEvent {
+  val stageIds: Seq[Int] = stageInfos.map(_.stageId)
+}
+// .
+```
 >由于在RDD的一系操作中，**如果一些连续的操作都是窄依赖操作的话，那么它们的执行是可以并行的，这一系列操作会形成pipeline的形式去处理数据**，而宽依赖则不行。<br/>
 >Spark中的Stage的划分就是以宽依赖来划分的，将一个Job(一个Action操作会生成一个Job，有多少个Action就有多少个Job)划分成多个Stage，一个Stage里面的任务，被抽象成TaskSet，一个TaskSet中包含很多Task(一个Partition对应一个Task)，同一个Stage中的Task的操作逻辑是相同的，只是要处理的数据不同
 1. TaskScheduler
