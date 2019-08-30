@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+source ~/.bash_profile
 cd $(dirname $0)
 BIN_HOME=$(pwd)
 APP_HOME=$(cd ${BIN_HOME}/..; pwd)
@@ -27,14 +28,16 @@ do
     echo "go" >> ${SQL_HOME}/${sql_file_name}
 done < ${CONF_HOME}/drop_table_name.conf
 function drop() {
+echo "sql file path -> "$1
 sed -i "s/yyyy/${year}/g" $1
 sed -i "s/mm/${mouth}/g" $1
 sed -i "s/dd/${day}/g" $1
 drop_sql=$(cat $1)
+echo "execute sql -> "${drop_sql}
 ${sybase_iq_db_conn} << EOF
-set temporary option conversion_error='off'
-go
 ${drop_sql}
 EOF
 }
+echo ${now_time}" start to drop table"
 drop ${SQL_HOME}/${sql_file_name}
+echo ${now_time}" end to drop table"
