@@ -1286,9 +1286,11 @@ private[spark] trait ListenerBus[L <: AnyRef, E] extends Logging {
     // JavaConverters can create a JIterableWrapper if we use asScala.
     // However, this method will be called frequently. To avoid the wrapper cost, here we use
     // Java Iterator directly.
+    // 获得注册在事件总线上所有的监听器和处理时间的迭代器
     val iter = listenersPlusTimers.iterator
     while (iter.hasNext) {
       val listenerAndMaybeTimer = iter.next()
+      // 取得监听器
       val listener = listenerAndMaybeTimer._1
       val maybeTimer = listenerAndMaybeTimer._2
       val maybeTimerContext = if (maybeTimer.isDefined) {
@@ -1333,7 +1335,7 @@ protected override def doPostEvent(
         listener.onStageSubmitted(stageSubmitted)
       case stageCompleted: SparkListenerStageCompleted =>
         listener.onStageCompleted(stageCompleted)
-      ......
+      //......
       case speculativeTaskSubmitted: SparkListenerSpeculativeTaskSubmitted =>
         listener.onSpeculativeTaskSubmitted(speculativeTaskSubmitted)
       case _ => listener.onOtherEvent(event)
@@ -1378,6 +1380,211 @@ case class SparkListenerJobStart(
 }
 // .
 ```
+###### AsyncEventQueue & LiveListenerBus
+SparkListenerBus默认采用的时间投递方式是同步调用。如果注册的监听器和产生的时间非常多，同步调用必然会时间的积压和处理的延时。因此Spark提供SparkListenerBus的实现类AsyncEventQueue中，提供异步事件队列机制，他也是SparkContext中的事件总线LiveListenerBus的基础。  
+1. AsyncEventQueue(异步时间队列)  
+在SparkListenerBus的实现类AsyncEventQueue中，提供了异步事件队列机制，它也是SparkContext中的事件总线LiveListenerBus的基础。  
+其声明的源代码如下：
+```scala
+private class AsyncEventQueue(
+    //队列名
+    val name: String,
+    //Spark配置参数
+    conf: SparkConf,
+    //LiveListenerBus的度量器
+    metrics: LiveListenerBusMetrics,
+    //事件总线LIveListenerBus
+    bus: LiveListenerBus)
+  extends SparkListenerBus
+  with Logging {
+  import AsyncEventQueue._
+  private val eventQueue = new LinkedBlockingQueue[SparkListenerEvent](conf.get(LISTENER_BUS_EVENT_QUEUE_CAPACITY))
+  private val eventCount = new AtomicLong()
+  private val droppedEventsCounter = new AtomicLong(0L)
+  //记录输出被丢弃事件值得时间戳
+  @volatile private var lastReportTimestamp = 0L
+  //用于标记是否发生了事件被丢弃得情况，使用AtomicBoolean来确保原子性
+  private val logDroppedEvent = new AtomicBoolean(false)
+  private var sc: SparkContext = null
+  //用于标记阻塞队列得状态
+  private val started = new AtomicBoolean(false)
+  private val stopped = new AtomicBoolean(false)
+  private val droppedEvents = metrics.metricRegistry.counter(s"queue.$name.numDroppedEvents")
+  private val processingTime = metrics.metricRegistry.timer(s"queue.$name.listenerProcessingTime")
+  //异步的实现主要是靠dispatchThread来完成
+  private val dispatchThread = new Thread(s"spark-listener-group-$name") {
+    setDaemon(true)//设置为守护线程
+    override def run(): Unit = Utils.tryOrStopSparkContext(sc) {
+      dispatch()
+    }
+  }
+}
+```
+* eventQueue：用于存储SparkListenerEvent事件的阻塞队列LinkedBlockingQueue，它的大小是通过 `spark.scheduler.listenerbus.eventqueue.capacity` 来设定的，默认值为1000，如果不设置阻塞队列的大小的话，那么阻塞队列的默认大小为Integer.MAX_VALUE，那么会有OOM的风险
+* eventCount：用于当前待处理事件的计数，因为事务从队列中取出并不代表事件处理完毕，所以不能用eventQueue的大小来表示，它使用AtomicLong类型来保证原子性
+* droppedEventsCounter & lastReportTimestamp：用于被丢弃的事件的计数。当阻塞队列满了的时候，新产生的队列无法入队，就会被丢弃掉，日志中定期输出该计数器的值，用lastReportTimestamp记录下每次输出的时间戳，每当被输出到日志的时候，这个值将会被重置为0
+* started & stopped：用于标记阻塞队列得状态
+* dispatchThread：是将队列中的事件分发到各监听器的守护线程，实际上调用了dispatch()分发，而Utils.tryOrStopSparkContext()方法的作用在于执行代码块时如果抛出异常，就另外起一个线程关闭SparkContext。  
+下面来看下 `org.apache.spark.scheduler.AsyncEventQueue#dispatch` 方法的源代码：
+```scala
+  private def dispatch(): Unit = LiveListenerBus.withinListenerThread.withValue(true) {
+    var next: SparkListenerEvent = eventQueue.take()
+    //循环去队列中取事件
+    while (next != POISON_PILL) {
+      val ctx = processingTime.time()
+      try {
+        //调用父类ListenerBus特质中的postToAll()方法，将其投递给所有已经注册的监听器
+        super.postToAll(next)
+      } finally {
+        ctx.stop()
+      }
+      //减少待处理事件的计数器的值
+      eventCount.decrementAndGet()
+      //获取下一个事件
+      next = eventQueue.take()
+    }
+    eventCount.decrementAndGet()
+  }
+  private object AsyncEventQueue {
+    val POISON_PILL = new SparkListenerEvent() { }
+  }
+```
+POISON_PILL(毒药丸)是AsyncEventQueue的伴生对象中定义的一个空的SparkListenerEvent，在队列停止时(即stop方法被调用的时候)会被放进队列中，当dispatchThread取得这个空对象的时候就会"中毒"退出  
+上面是从队列中获取事件的方法，接下来看下往队列中加入事件的方法。
+即 `org.apache.spark.scheduler.AsyncEventQueue.post` 方法的源码如下：
+```scala
+  def post(event: SparkListenerEvent): Unit = {
+    //检查队列是否已经停止了，若停止了则直接退出，没有停止则尝试往队列中放入事件
+    if (stopped.get()) {
+      return
+    }
+    //待处理事件的计数器+1
+    eventCount.incrementAndGet()
+    //offer方法是将一个元素插到队尾，如果插入成功则返回true，如果失败则返回false
+    if (eventQueue.offer(event)) {
+      //添加事件成功不再进行剩下的逻辑
+      return
+    }
+    //添加事件失败，待处理事件计数器-1
+    eventCount.decrementAndGet()
+    //丢弃事件的度量器计数器+1
+    droppedEvents.inc()
+    //丢弃事件的计数器+1
+    droppedEventsCounter.incrementAndGet()
+    if (logDroppedEvent.compareAndSet(false, true)) {
+      // Only log the following message once to avoid duplicated annoying logs.
+      logError(s"Dropping event from queue $name. " +
+        "This likely means one of the listeners is too slow and cannot keep up with " +
+        "the rate at which tasks are being started by the scheduler.")
+    }
+    logTrace(s"Dropping event $event")
+
+    val droppedCount = droppedEventsCounter.get
+    if (droppedCount > 0) {
+      // Don't log too frequently
+      // 如果离上次打印丢弃事件数的时间间隔大于1分钟的话就再次打印一次
+      if (System.currentTimeMillis() - lastReportTimestamp >= 60 * 1000) {
+        // There may be multiple threads trying to decrease droppedEventsCounter.
+        // Use "compareAndSet" to make sure only one thread can win.
+        // And if another thread is increasing droppedEventsCounter, "compareAndSet" will fail and
+        // then that thread will update it.
+        if (droppedEventsCounter.compareAndSet(droppedCount, 0)) {
+          val prevLastReportTimestamp = lastReportTimestamp
+          lastReportTimestamp = System.currentTimeMillis()
+          val previous = new java.util.Date(prevLastReportTimestamp)
+          logWarning(s"Dropped $droppedCount events from $name since $previous.")
+        }
+      }
+    }
+  }
+```
+2. LiveListenerBus(异步时间总线)   
+AsyncEventQueue继承了SparkListenerBus特质，LiveListenerBus把AsyncEventQueue作为核心。以下是LiveListenerBus的源码  
+```scala
+private[spark] class LiveListenerBus(conf: SparkConf) {
+  import LiveListenerBus._
+  private var sparkContext: SparkContext = _
+  private[spark] val metrics = new LiveListenerBusMetrics(conf)
+  private val started = new AtomicBoolean(false)
+  private val stopped = new AtomicBoolean(false)
+  private val droppedEventsCounter = new AtomicLong(0L)
+  @volatile private var lastReportTimestamp = 0L
+  //一个维护着AsyncEventQueue的一个集合
+  private val queues = new CopyOnWriteArrayList[AsyncEventQueue]()
+  @volatile private[scheduler] var queuedEvents = new mutable.ListBuffer[SparkListenerEvent]()
+  // ...
+}
+```
+这个类中的大部分属性与AsyncEventQueue大同小异，多出来的属性主要是queue和queueEvent这两个属性
+* queues属性：维护一个AsyncEventQueue列表，也就是说LiveLinstenerBus中有多少个时间队列，它采用CopyOnWriteArrayList来保证线程安全。
+* queuedEvent：维护一个SparkListenerEvent列表，用途是在LiveLListenerBus启动成功之前，缓存可能y已经收到的时间，在启动之后，这些实现首先会被投递出去  
+LiveListenerBus作为一个事件总线，必须监听器注册，事件投递等功能，这些都是在AsyncEventQueue基础上去做的。  
+首先看下 `org.apache.spark.scheduler.LiveListenerBus.addToQueue` 的代码
+```scala
+  private[spark] def addToQueue(
+      listener: SparkListenerInterface,
+      //监听器队列的名字
+      queue: String): Unit = synchronized {
+    if (stopped.get()) {
+      throw new IllegalStateException("LiveListenerBus is stopped.")
+    }
+    queues.asScala.find(_.name == queue) match {
+      //queue->AsyncEventQueue
+      case Some(queue: AsyncEventQueue) =>
+        //往AsyncEventQueue中注册监听器
+        queue.addListener(listener)
+      //没有匹配到相同名字的AsyncEventQueue
+      case None = >
+        //新建一个新的AsyncEventQueue
+        val newQueue = new AsyncEventQueue(queue, conf, metrics, this)
+        //往新建的AsyncEventQueue中注册监听器
+        newQueue.addListener(listener)
+        if (started.get()) {
+          //启动新建的队列
+          newQueue.start(sparkContext)
+        }
+        //把新建的队列加入到queues中
+        queues.add(newQueue)
+    }
+  }
+```
+该方法将监听器注册到队列中去。他会去成员变量queues中去寻找是否存在相同队列名的队列，如果相同名称的队列存在的话，那么就调用父类ListenerBus的addListener()方法注册监听器；  
+如果没有名称相同的监听器，则生成一个新的AsyncEventQueue队列，然后把监听器注册到新的队列中去。  
+投递事件的相关方法如下， `org.apache.spark.scheduler.LiveListenerBus.post` 和 `org.apache.spark.scheduler.LiveListenerBus#postToQueues` 方法如下：
+```scala
+  /** Post an event to all queues. */
+  def post(event: SparkListenerEvent): Unit = {
+    if (stopped.get()) {
+      return
+    }
+    metrics.numEventsPosted.inc()
+    // If the event buffer is null, it means the bus has been started and we can avoid
+    // synchronization and post events directly to the queues. This should be the most
+    // common case during the life of the bus.
+    if (queuedEvents == null) {
+      postToQueues(event)
+      return
+    }
+    // Otherwise, need to synchronize to check whether the bus is started, to make sure the thread
+    // calling start() picks up the new event.
+    synchronized {
+      if (!started.get()) {
+        queuedEvents += event
+        return
+      }
+    }
+    // If the bus was already started when the check above was made, just post directly to the
+    // queues.
+    postToQueues(event)
+  }
+  private def postToQueues(event: SparkListenerEvent): Unit = {
+    val it = queues.iterator()
+    while (it.hasNext()) {
+      it.next().post(event)
+    }
+  }
+```
+post()方法会检查queuedEvents中有无缓存的事件，以及事件总线是否还没有启动。投递时会调用postToQueues()方法，将事件发送给所有队列，由AsyncEventQueue来完成投递到监听器的工作。
 >由于在RDD的一系操作中，**如果一些连续的操作都是窄依赖操作的话，那么它们的执行是可以并行的，这一系列操作会形成pipeline的形式去处理数据**，而宽依赖则不行。<br/>
 >Spark中的Stage的划分就是以宽依赖来划分的，将一个Job(一个Action操作会生成一个Job，有多少个Action就有多少个Job)划分成多个Stage，一个Stage里面的任务，被抽象成TaskSet，一个TaskSet中包含很多Task(一个Partition对应一个Task)，同一个Stage中的Task的操作逻辑是相同的，只是要处理的数据不同
 1. TaskScheduler
@@ -2154,7 +2361,7 @@ private[spark] class BroadcastManager(
         * 上面两种join方式对于一个大表一个小表的情形比较适用，但当两个表都非常大的时候，显然无论使用哪种方式都对内存造成巨大压力，这是因为两者采用的都是hash join，是将另一侧的数据完全加载到内存中，使用hash code取join keys值相等的记录进行连接
         * 当两张表都特别大时，Spark SQL采用一种全新的方案，即Sort Merge Join。这种方式不用将一侧数据全部加载后再进行hash join，但需要在join前对数据进行排序，因为两个序列是有序的，从头遍历，遇到相同的key就输出，如果不同，左边小就继续取左边，反之取右边。可以看出无论分区多大，Sort Merge Join都不用把某一侧的数据全部加载到内存中，而是即用即取即丢，从而大大提高了大数据量下sql的join操作。
 ## Spark内存模型
-### Spark 1.6.x的时候通过**StaticMemoryManager**，数据处理以及类的实体对象都存在JVM Heap中(具体的额JVM内存结构参见JVM.md)
+### Spark 1.6.x的时候通过**org.apache.spark.memory.StaticMemoryManager**，数据处理以及类的实体对象都存在JVM Heap中(具体的额JVM内存结构参见JVM.md)
 1. JVM Heap的默认值是512M，这取决于 `spark.executor.memory` 参数决定，不论你定义了多大的 `spark.executor.memory` .Spark都必然会定义一个安全空间，在默认情况下只会使用Java Heap上的90%作为安全空间，在单个Executor的角度来看，就是 `Java Heap * 90%`
     * 场景一：假设在一个Executor，它可用的大小是10G，实际上Spark只能使用90%，这个安全空间的比例是由 `spark.storage.safetyFaction` 来控制的(如果内存非常大的话，可以考虑把这个比例调整为95%)，
     **在安全空间中也会被划分为三个不同的空间，一个是storage区，一个是unroll区和一个shuffle区**
@@ -2206,7 +2413,7 @@ private[spark] class BroadcastManager(
         (systemMaxMemory * memoryFraction * safetyFraction).toLong
      }
     ``` 
-### Spark2.x的内存模型叫联合内存(Spark Unified Memory)，数据缓存与数据执行之间的内存可以相互移动，这是一种更弹性的方式，数据处理以及类的实例存放在JVM中，Spark2.x中把内存划分成了3块：Reserved Memory,User Memory和Spark Memory
+### Spark2.x的内存模型叫联合内存(**org.apache.spark.memory.UnifiedMemoryManager**)，数据缓存与数据执行之间的内存可以相互移动，这是一种更弹性的方式，数据处理以及类的实例存放在JVM中，Spark2.x中把内存划分成了3块：Reserved Memory,User Memory和Spark Memory
 1. Reserved Memory：默认是300M，这个数字一般是固定不变的，在系统运行时，Java Heap Size的大小至少为 `Heap Reserved Memory * 1.5` 
 > e.g. 300M * 1.5 = 450M的JVM配置，一般本地开发需要2G内存
 ```scala
