@@ -1,0 +1,38 @@
+syntax = "proto2";
+
+package zhengwei.netty.protobuf;
+//加速编译
+option optimize_for = SPEED;
+//最终生成Java类的包名
+option java_package = "zhengwei.netty.protobuf";
+//最终生成Java类的类名
+option java_outer_classname = "MyDataInfo";
+
+message MyMessage {
+    enum DataType {
+        PersonType = 1;
+        DogType = 2;
+        CatType = 3;
+    }
+    required DataType data_type = 1;
+    //如果有多个可选的属性值的话，将只会有一个属性值被设置，后设置的值会覆盖前一个设置的值
+    oneof data_body {
+        Person person = 2;
+        Dog dog = 3;
+        Cat cat = 4;
+    }
+}
+
+message Person {
+    optional string name = 1;
+    optional int32 age = 2;
+    optional string address = 3;
+}
+message Dog {
+    optional string name = 1;
+    optional int32 age = 2;
+}
+message Cat {
+    optional string name = 1;
+    optional string city = 2;
+}
