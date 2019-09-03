@@ -1585,6 +1585,267 @@ LiveListenerBus作为一个事件总线，必须监听器注册，事件投递�
   }
 ```
 post()方法会检查queuedEvents中有无缓存的事件，以及事件总线是否还没有启动。投递时会调用postToQueues()方法，将事件发送给所有队列，由AsyncEventQueue来完成投递到监听器的工作。
+##### 2.SparkEnv(Spark运行时环境)
+继事件总线初始化完毕之后，接下来需要初始化的组件就是SparkEnv，即Spark执行环境。Driver和Executor的运行都依赖于SparkEnv提供的环境作为支持。   
+SparkEnv初始化之后，与Spark相关的计算、存储和度量系统才会真正的准备好，SparkEnv中也包含h很多的组件。
+###### SparkEnv入口
+Driver环境的创建是通过 `org.apache.spark.SparkEnv.createDriverEnv` 方法来创建的，代码如下：
+```scala
+  private[spark] def createDriverEnv(
+      conf: SparkConf,
+      isLocal: Boolean,
+      //数据总线
+      listenerBus: LiveListenerBus,
+      //申请的核心数
+      numCores: Int,
+      mockOutputCommitCoordinator: Option[OutputCommitCoordinator] = None): SparkEnv = {
+    assert(conf.contains(DRIVER_HOST_ADDRESS),
+      s"${DRIVER_HOST_ADDRESS.key} is not set on the driver!")
+    assert(conf.contains("spark.driver.port"), "spark.driver.port is not set on the driver!")
+    val bindAddress = conf.get(DRIVER_BIND_ADDRESS)
+    val advertiseAddress = conf.get(DRIVER_HOST_ADDRESS)
+    val port = conf.get("spark.driver.port").toInt
+    val ioEncryptionKey = if (conf.get(IO_ENCRYPTION_ENABLED)) {
+      Some(CryptoStreamUtils.createKey(conf))
+    } else {
+      None
+    }
+    create(
+      conf,
+      SparkContext.DRIVER_IDENTIFIER,
+      bindAddress,
+      advertiseAddress,
+      Option(port),
+      isLocal,
+      numCores,
+      ioEncryptionKey,
+      listenerBus = listenerBus,
+      mockOutputCommitCoordinator = mockOutputCommitCoordinator
+    )
+  }
+```
+`org.apache.spark.SparkEnv.createExecutorEnv` 是创建Executor的运行环境，代码如下：
+```scala
+  private[spark] def createExecutorEnv(
+      conf: SparkConf,
+      executorId: String,
+      hostname: String,
+      numCores: Int,
+      ioEncryptionKey: Option[Array[Byte]],
+      isLocal: Boolean): SparkEnv = {
+    val env = create(
+      conf,
+      executorId,
+      hostname,
+      hostname,
+      None,
+      isLocal,
+      numCores,
+      ioEncryptionKey
+    )
+    SparkEnv.set(env)
+    env
+  }
+```
+创建Driver和Executor环境的时候最终都是调用的 `org.apache.spark.SparkEnv$#create` 方法去创建。首先看下这个方法的签名，签名如下：
+```scala
+  /**
+   * Helper method to create a SparkEnv for a driver or an executor.
+   */
+  private def create(
+      conf: SparkConf,
+      //executor的唯一标识，如果driver的话则是driver字符串
+      executorId: String,
+      //监听Socket的绑定端口
+      bindAddress: String,
+      //RPC端点地址
+      advertiseAddress: String,
+      //监听的端口号
+      port: Option[Int],
+      //是否是本地模式
+      isLocal: Boolean, 
+      //分配driver或executor的核心数
+      numUsableCores: Int,
+      //I/O加密的密钥，当spark.io.encryption.enable配置项启用时才有效
+      ioEncryptionKey: Option[Array[Byte]],
+      listenerBus: LiveListenerBus = null,
+      mockOutputCommitCoordinator: Option[OutputCommitCoordinator] = None): SparkEnv
+```
+###### SparkEnv初始化
+按照 `org.apache.spark.SparkEnv#create` 方法中的顺序依次查看SparkEnv中初始化的组件
+1. SecurityManager  
+即安全管理器，它通过共享密钥的方式进行认证，以及基于ACL(Access Control List，访问控制列表)来管理Spark内部的账号和权限，其初始化代码如下：
+```scala
+val securityManager = new SecurityManager(conf, ioEncryptionKey)
+if (isDriver) {
+  securityManager.initializeAuth()
+}
+
+ioEncryptionKey.foreach { _ =>
+  if (!securityManager.isEncryptionEnabled()) {
+    logWarning("I/O encryption enabled without RPC encryption: keys will be visible on the " +
+      "wire.")
+  }
+}
+```
+2. RpcEnv
+RpcEnv即RPC环境，Spark各个组件之间必然会存在大量的网络通讯，这些通信实体在Spark的RPC体系中会被抽象成RPC端点(即RpcEndpoint)及其引用(即RpcEndpointRef)，RpcEnv为RPC端点提供处理消息环境，并负责RPC端点注册，端点之间的消息路由，以及端点的销毁。其初始化代码如下：
+```scala
+val systemName = if (isDriver) driverSystemName else executorSystemName
+val rpcEnv = RpcEnv.create(systemName, bindAddress, advertiseAddress, port.getOrElse(-1), conf, securityManager, numUsableCores, !isDriver)
+// Figure out which port RpcEnv actually bound to in case the original port is 0 or occupied.
+if (isDriver) {
+  conf.set("spark.driver.port", rpcEnv.address.port.toString)
+}
+def create(
+      name: String,
+      bindAddress: String,
+      advertiseAddress: String,
+      port: Int,
+      conf: SparkConf,
+      securityManager: SecurityManager,
+      numUsableCores: Int,
+      clientMode: Boolean): RpcEnv = {
+    val config = RpcEnvConfig(conf, name, bindAddress, advertiseAddress, port, securityManager,
+      numUsableCores, clientMode)
+    new NettyRpcEnvFactory().create(config)
+}
+```
+Spark底层通讯使用的是Netty来实现的，NettyRpcEnv目前是RpcEnv的唯一的实现类，RPC内部细节很多，会在以后进行分析。  
+3. SerializerManager  
+即序列化器。Spark在存储或交换数据的时候，往往需要先将数据序列化之后再反序列化，为了节省空间还会对数据进行压缩，这就是SerializerManager组件的工作。其初始化代码如下：
+```scala
+val serializer = instantiateClassFromConf[Serializer]("spark.serializer", "org.apache.spark.serializer.JavaSerializer")
+logDebug(s"Using serializer: ${serializer.getClass}")
+//数据序列化器
+val serializerManager = new SerializerManager(serializer, conf, ioEncryptionKey)
+//闭包序列化器
+val closureSerializer = new JavaSerializer(conf)
+```
+`instantiateClassFromConf()` 方法是在create()内部创建的，它会先去SparkConf中寻找 `spark.serializer` 相关配置，如果没有找到则默认使用 `org.apache.spark.util.Utils$.classForName` 方法反射生成一个 `org.apache.spark.util.Utils$.classForName` 序列化器。
+除了 `org.apache.spark.serializer.JavaSerializer` 这个序列化器，我们还会使用到 `org.apache.spark.serializer.KryoSerializer` 序列化器。  
+序列化器有两个，一个是serializerManager：用于对数据的序列化；另一个是closureSerializer序列化器：是对于闭包的序列化器，此序列化器常用在DAGScheduler、TaskSetManager，其固定类型是JavaSerializer，不能修改  
+4. BroadcastManager
+即广播管理器。它除了为用户提供广播共享数据的功能之外，再Spark Core内部也广泛使用。如共享通用配置项或通用数据结构等待。其初始化代码如下：
+```scala
+val broadcastManager = new BroadcastManager(isDriver, conf, securityManager)
+```
+5. MapOutputTracker  
+即Map端输出的跟踪器。再Shuffle过程中，Map任务通过Shuffle Writer阶段中产生了中间数据，Reducer任务在进行Shuffle Read的时候需要知道哪些数据位于哪些节点之上，以及Map输出的状态等信息，MapOutputTracker就负责维护这些信息。其初始化代码如下：
+ ```scala
+//会去区分Dirver还是Executor端
+val mapOutputTracker = if (isDriver) {
+  new MapOutputTrackerMaster(conf, broadcastManager, isLocal)
+} else {
+  new MapOutputTrackerWorker(conf)
+}
+// Have to assign trackerEndpoint after initialization as MapOutputTrackerEndpoint
+// requires the MapOutputTracker itself
+mapOutputTracker.trackerEndpoint = registerOrLookupEndpoint(MapOutputTracker.ENDPOINT_NAME,
+  new MapOutputTrackerMasterEndpoint(
+    rpcEnv, mapOutputTracker.asInstanceOf[MapOutputTrackerMaster], conf))
+```
+可见Driver端的MapOutputTracker和Executor端的MapOutputTracker是不一样的，Executor端的MapOutputTrackerWorker会像Driver端的MapOutputTrackerMaster汇报自己的情况。  
+创建完MapOutputTracker实例之后，还会调用registerOrLookupEndpoint()方法，注册（Driver情况）或查找（Executor情况）对应的RPC端点，并返回其引用。  
+6. ShuffleManager  
+即Shuffle管理器。顾名思义，它负责管理Shuffle阶段的机制。并提供Shuffle方法的具体实现。其初始化代码如下：
+```scala
+// Let the user specify short names for shuffle managers
+val shortShuffleMgrNames = Map(
+  "sort" -> classOf[org.apache.spark.shuffle.sort.SortShuffleManager].getName,
+  "tungsten-sort" -> classOf[org.apache.spark.shuffle.sort.SortShuffleManager].getName)
+val shuffleMgrName = conf.get("spark.shuffle.manager", "sort")
+val shuffleMgrClass =
+  shortShuffleMgrNames.getOrElse(shuffleMgrName.toLowerCase(Locale.ROOT), shuffleMgrName)
+val shuffleManager = instantiateClass[ShuffleManager](shuffleMgrClass)
+```
+ShuffleManager的种类可以通过配置项spark.shuffle.manager设置，默认为sort，即SortShuffleManager。  
+取得对应的ShuffleManager类名之后，通过反射构建其实例。Shuffle是Spark计算过程中非常重要的一环，之后会深入地研究它。
+7. MemoryManager  
+即内存管理器，它负责Spark个节点内存的分配、利用和回收。  
+Spark作为一个内存优先的大数据处理框架，内存管理机制是非常细的，主要涉及存储和执行两大方面。其初始化代码如下：
+```scala
+val useLegacyMemoryManager = conf.getBoolean("spark.memory.useLegacyMode", false)
+val memoryManager: MemoryManager =
+  if (useLegacyMemoryManager) {
+    //静态内存管理器(1.6.x之前使用)
+    new StaticMemoryManager(conf, numUsableCores)
+  } else {
+    //同一内存管理器(1.6.x之后使用，默认)
+    UnifiedMemoryManager(conf, numUsableCores)
+  }
+```
+8. BlockManager  
+即块管理器。块作为Spark内部数据的基本单位，与操作系统中的"块"和HDFS中的"块"都不太一样。它可以存在于堆内内存，也可以存在于堆外内存和外存（磁盘）中，是Spark数据的通用表示方式。BlockManager就负责管理块的存储、读写流程和状态信息，其初始化代码如下：
+```scala
+val blockManagerPort = if (isDriver) {
+  conf.get(DRIVER_BLOCK_MANAGER_PORT)
+} else {
+  conf.get(BLOCK_MANAGER_PORT)
+}
+val blockTransferService =
+  new NettyBlockTransferService(conf, securityManager, bindAddress, advertiseAddress,
+    blockManagerPort, numUsableCores)
+val blockManagerMaster = new BlockManagerMaster(registerOrLookupEndpoint(
+  BlockManagerMaster.DRIVER_ENDPOINT_NAME,
+  new BlockManagerMasterEndpoint(rpcEnv, isLocal, conf, listenerBus)),
+  conf, isDriver)
+```
+在初始化BlockManager之前，还需要先初始化块传输服务BlockTransferService，以及BlockManager的主节点BlockManagerMaster。  
+BlockManager也是采用主从结构设计的，Driver上存在主RPC端点BlockManagerMasterEndpoint，而各个Executor上都存在从RPC端点BlockManagerSlaveEndpoint。
+9. MetricsSystem
+MetricsSystem即度量系统。它是Spark监控体系的后端部分，负责收集与输出度量（也就是各类监控指标）数据。度量系统由系统实例Instance、度量数据源Source、度量输出目的地Sink三部分组成。其在SparkEnv里的初始化代码如下
+```scala
+val metricsSystem = if (isDriver) {
+  MetricsSystem.createMetricsSystem("driver", conf, securityManager)
+} else {
+  conf.set("spark.executor.id", executorId)
+  val ms = MetricsSystem.createMetricsSystem("executor", conf, securityManager)
+  ms.start()
+  ms
+}
+```
+10. OutputCommitCoordinator
+即输出提交协调器。如果需要将Spark作业的结果数据持久化到外部存储（最常见的就是HDFS），就需要用到它来判定作业的每个Stage是否有权限提交。其初始化代码如下。
+```scala
+val outputCommitCoordinator = mockOutputCommitCoordinator.getOrElse {
+  new OutputCommitCoordinator(conf, isDriver)
+}
+val outputCommitCoordinatorRef = registerOrLookupEndpoint("OutputCommitCoordinator",
+  new OutputCommitCoordinatorEndpoint(rpcEnv, outputCommitCoordinator))
+outputCommitCoordinator.coordinatorRef = Some(outputCommitCoordinatorRef)
+```
+可见，在Driver上还注册了其RPC端点OutputCommitCoordinatorEndpoint，各个Executor会通过其引用来访问它。  
+11. SparkEnv的创建与保存
+在create()方法的最后，会构建SparkEnv类的实例，创建Driver端的临时文件夹，并返回该实例。
+```scala
+val envInstance = new SparkEnv(
+  executorId,
+  rpcEnv,
+  serializer,
+  closureSerializer,
+  serializerManager,
+  mapOutputTracker,
+  shuffleManager,
+  broadcastManager,
+  blockManager,
+  securityManager,
+  metricsSystem,
+  memoryManager,
+  outputCommitCoordinator,
+  conf)
+
+// Add a reference to tmp dir created by driver, we will delete this tmp dir when stop() is
+// called, and we only need to do it for driver. Because driver may run as a service, and if we
+// don't delete this tmp dir when sc is stopped, then will create too many tmp dirs.
+if (isDriver) {
+  val sparkFilesDir = Utils.createTempDir(Utils.getLocalDir(conf), "userFiles").getAbsolutePath
+  envInstance.driverTmpDir = Some(sparkFilesDir)
+}
+
+envInstance
+}
+```
 >由于在RDD的一系操作中，**如果一些连续的操作都是窄依赖操作的话，那么它们的执行是可以并行的，这一系列操作会形成pipeline的形式去处理数据**，而宽依赖则不行。<br/>
 >Spark中的Stage的划分就是以宽依赖来划分的，将一个Job(一个Action操作会生成一个Job，有多少个Action就有多少个Job)划分成多个Stage，一个Stage里面的任务，被抽象成TaskSet，一个TaskSet中包含很多Task(一个Partition对应一个Task)，同一个Stage中的Task的操作逻辑是相同的，只是要处理的数据不同
 1. TaskScheduler
