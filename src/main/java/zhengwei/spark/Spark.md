@@ -1846,6 +1846,259 @@ if (isDriver) {
 envInstance
 }
 ```
+###### SparkEnv中的重要组件-RpcEnv 
+RpcEnv对于Spark的整体运行起着至关重要的作用，Spark的内部和外部的通讯全部依赖于RpcEnv  
+1. RPC端点及其引用  
+RpcEnv抽象类是Spark RPC环境的通用表示，它其中的 `org.apache.spark.rpc.RpcEnv.setupEndpoint` 方法是向RPC环境注册一个RPC端点(RpcEndpoint)，并返回其引用(RpcEndpointRef)。  
+如果一个客户端想要对一个RpcEndpoint发送消息的话，那么必须先获取其对应的RpcEndpointRef。RpcEndpoint和RpcEndpointRef是Rpc中基础组件  
+2. RpcEndpoint  
+RpcEndpoint是一个特质，其源代码如下：
+```scala
+private[spark] trait RpcEndpoint {
+  /**
+   * The [[RpcEnv]] that this [[RpcEndpoint]] is registered to.
+   */
+  val rpcEnv: RpcEnv
+  /**
+   * The [[RpcEndpointRef]] of this [[RpcEndpoint]]. `self` will become valid when `onStart` is
+   * called. And `self` will become `null` when `onStop` is called.
+   *
+   * Note: Because before `onStart`, [[RpcEndpoint]] has not yet been registered and there is not
+   * valid [[RpcEndpointRef]] for it. So don't call `self` before `onStart` is called.
+   * 取得当前RpcEndpoint对应的RpcEndpointRef，当onStart方法调用之前RpcEndpointRef将是null
+   */
+  final def self: RpcEndpointRef = {
+    require(rpcEnv != null, "rpcEnv has not been initialized")
+    rpcEnv.endpointRef(this)
+  }
+  /**
+   * Process messages from `RpcEndpointRef.send` or `RpcCallContext.reply`. If receiving a
+   * unmatched message, `SparkException` will be thrown and sent to `onError`.
+   * 接收其他RpcEndpointRef发来的消息并进行处理。
+   */
+  def receive: PartialFunction[Any, Unit] = {
+    case _ => throw new SparkException(self + " does not implement 'receive'")
+  }
+  /**
+   * Process messages from `RpcEndpointRef.ask`. If receiving a unmatched message,
+   * `SparkException` will be thrown and sent to `onError`.
+   * 接收其他RpcEndpointRef发来的消息，并发送回复
+   */
+  def receiveAndReply(context: RpcCallContext): PartialFunction[Any, Unit] = {
+    case _ => context.sendFailure(new SparkException(self + " won't reply anything"))
+  }
+  /**
+   * Invoked when any exception is thrown during handling messages.
+   * 消息处理出现异常时调用的方法
+   */
+  def onError(cause: Throwable): Unit = {
+    // By default, throw e and let RpcEnv handle it
+    throw cause
+  }
+  /**
+   * Invoked when `remoteAddress` is connected to the current node.
+   * 当一个RPC端点建立连接的时候调用的方法
+   */
+  def onConnected(remoteAddress: RpcAddress): Unit = {
+    // By default, do nothing.
+  }
+  /**
+   * Invoked when `remoteAddress` is lost.
+   * 当一个RPC端点失去连接的时候调用的方法
+   */
+  def onDisconnected(remoteAddress: RpcAddress): Unit = {
+    // By default, do nothing.
+  }
+  /**
+   * Invoked when some network error happens in the connection between the current node and
+   * `remoteAddress`.
+   * 当RPC端点的链接出现网络错误时调用的方法
+   */
+  def onNetworkError(cause: Throwable, remoteAddress: RpcAddress): Unit = {
+    // By default, do nothing.
+  }
+  /**
+   * Invoked before [[RpcEndpoint]] starts to handle any message.
+   * 当RPC端点初始化的时候调用的方法
+   */
+  def onStart(): Unit = {
+    // By default, do nothing.
+  }
+  /**
+   * Invoked when [[RpcEndpoint]] is stopping. `self` will be `null` in this method and you cannot
+   * use it to send or ask messages.
+   * 当RPC端点关闭的时候调用的方法，在调用这个方法之后RpcEndpointRef将被置为null
+   */
+  def onStop(): Unit = {
+    // By default, do nothing.
+  }
+  /**
+   * A convenient method to stop [[RpcEndpoint]].
+   * 停止当前的RpcEndpoint
+   */
+  final def stop(): Unit = {
+    val _self = self
+    if (_self != null) {
+      rpcEnv.stop(_self)
+    }
+  }
+}
+```
+3. RpcEndpoint的继承关系
+```text
+RpcEndpoint (org.apache.spark.rpc.RpcEndpoint)
+    OutputCommitCoordinatorEndpoint in OutputCommitCoordinator$ (org.apache.spark.scheduler)
+    WorkerWatcher (org.apache.spark.deploy.worker)
+    RpcEndpointVerifier (org.apache.spark.rpc.netty)
+    MapOutputTrackerMasterEndpoint (org.apache.spark)
+    ThreadSafeRpcEndpoint (org.apache.spark.rpc)
+        CoarseGrainedExecutorBackend (org.apache.spark.executor)
+        DriverEndpoint in CoarseGrainedSchedulerBackend (org.apache.spark.scheduler.cluster)
+        BlockManagerMasterEndpoint (org.apache.spark.storage)
+        HeartbeatReceiver (org.apache.spark)
+        EpochCoordinator (org.apache.spark.sql.execution.streaming.continuous)
+        StateStoreCoordinator (org.apache.spark.sql.execution.streaming.state)
+        ClientEndpoint (org.apache.spark.deploy)
+        Worker (org.apache.spark.deploy.worker)
+        RPCContinuousShuffleReader (org.apache.spark.sql.execution.streaming.continuous.shuffle)
+        BarrierCoordinator (org.apache.spark)
+        ContinuousRecordEndpoint (org.apache.spark.sql.execution.streaming)
+        LocalEndpoint (org.apache.spark.scheduler.local)
+        Master (org.apache.spark.deploy.master)
+        BlockManagerSlaveEndpoint (org.apache.spark.storage)
+```
+ThreadSafeRpcEndpoint是直接继承自RpcEndpoint的特质。顾名思义，他要求RPC端点对消息的处理必须是线程安全的，线程安全的RpcEndpoint在处理消息时必须满足happens-before原则。  
+4. RpcEndpointRef  
+RpcEndpointRef是一个抽象类，其源代码如下：
+```scala
+private[spark] abstract class RpcEndpointRef(conf: SparkConf) extends Serializable with Logging {
+  //最大重连次数，用spark.rpc.numRetries来控制
+  private[this] val maxRetries = RpcUtils.numRetries(conf)
+  //每次重连的等待时间，用spark.rpc.retry.wait来控制
+  private[this] val retryWaitMs = RpcUtils.retryWaitMs(conf)
+  //对RPC端点进行ask()操作的默认超时时长，默认120秒，用spark.rpc.askTimeout(优先级较高)或spark.network.timeout去控制
+  private[this] val defaultAskTimeout = RpcUtils.askRpcTimeout(conf)
+  /**
+   * return the address for the [[RpcEndpointRef]]
+   */
+  def address: RpcAddress
+  def name: String
+  /**
+   * Sends a one-way asynchronous message. Fire-and-forget semantics.
+   * 异步发送一条单向消息，并且"发送即忘记(fire-and-forget)"，不需要回复
+   */
+  def send(message: Any): Unit
+  /**
+   * Send a message to the corresponding [[RpcEndpoint.receiveAndReply)]] and return a [[Future]] to
+   * receive the reply within the specified timeout.
+   *
+   * This method only sends the message once and never retries.
+   * 异步发送一条消息，并在规定的超时时间内等待对端RPC端点的回复，RPC端点会调用receiveAndReply方法去处理回复的消息
+   */
+  def ask[T: ClassTag](message: Any, timeout: RpcTimeout): Future[T]
+  /**
+   * Send a message to the corresponding [[RpcEndpoint.receiveAndReply)]] and return a [[Future]] to
+   * receive the reply within a default timeout.
+   *
+   * This method only sends the message once and never retries.
+   */
+  def ask[T: ClassTag](message: Any): Future[T] = ask(message, defaultAskTimeout)
+  /**
+   * Send a message to the corresponding [[RpcEndpoint.receiveAndReply]] and get its result within a
+   * default timeout, throw an exception if this fails.
+   *
+   * Note: this is a blocking action which may cost a lot of time,  so don't call it in a message
+   * loop of [[RpcEndpoint]].
+   * 是ask方法的同步实现。由于它是阻塞的，有可能会消耗大量的时间因此必须慎用
+   * @param message the message to send
+   * @tparam T type of the reply message
+   * @return the reply message from the corresponding [[RpcEndpoint]]
+   */
+  def askSync[T: ClassTag](message: Any): T = askSync(message, defaultAskTimeout)
+  /**
+   * Send a message to the corresponding [[RpcEndpoint.receiveAndReply]] and get its result within a
+   * specified timeout, throw an exception if this fails.
+   *
+   * Note: this is a blocking action which may cost a lot of time, so don't call it in a message
+   * loop of [[RpcEndpoint]].
+   *
+   * @param message the message to send
+   * @param timeout the timeout duration
+   * @tparam T type of the reply message
+   * @return the reply message from the corresponding [[RpcEndpoint]]
+   */
+  def askSync[T: ClassTag](message: Any, timeout: RpcTimeout): T = {
+    val future = ask[T](message, timeout)
+    timeout.awaitResult(future)
+  }
+}
+```
+值得注意的是：maxRetries和retryWaitMs这两个属性在2.3.3版本之前是有用到的，在2.4.3版本中没有用到了，整明Spark官方取消了RPC重试机制，也就是统一为消息传输语义中的at most once予以了。我们可以自己实现带有重试机制的RpcEndpointRef  
+RpcEndpointRef只有一个子类，那就是 `org.apache.spark.rpc.netty.NettyRpcEndpointRef` ，NettyRpcEndpointRef对send和ask方法的实现如下：
+```scala
+  override def send(message: Any): Unit = {
+    require(message != null, "Message is null")
+    nettyEnv.send(new RequestMessage(nettyEnv.address, this, message))
+  }
+  override def ask[T: ClassTag](message: Any, timeout: RpcTimeout): Future[T] = {
+    nettyEnv.ask(new RequestMessage(nettyEnv.address, this, message), timeout)
+  }
+```
+这两个方法都依赖于NettyRpcEnv类，来看下他是被如何构建出来的，它是调用了 `org.apache.spark.rpc.netty.NettyRpcEnvFactory.create` 方法创建的：
+```scala
+  def create(config: RpcEnvConfig): RpcEnv = {
+    val sparkConf = config.conf
+    // Use JavaSerializerInstance in multiple threads is safe. However, if we plan to support
+    // KryoSerializer in future, we have to use ThreadLocal to store SerializerInstance
+    //创建JavaSerializer序列化器，用于RPC传输中的序列化。
+    val javaSerializerInstance = new JavaSerializer(sparkConf).newInstance().asInstanceOf[JavaSerializerInstance]
+    //通过NettyRpcEnv的构造方法创建啊NettyRpcEnv，这其中会涉及到一些RPC基础组件的初始化。
+    val nettyEnv = new NettyRpcEnv(sparkConf, javaSerializerInstance, config.advertiseAddress, config.securityManager, config.numUsableCores)
+    if (!config.clientMode) {
+      //偏离函数
+      val startNettyRpcEnv: Int => (NettyRpcEnv, Int) = { actualPort =>
+        nettyEnv.startServer(config.bindAddress, actualPort)
+        (nettyEnv, nettyEnv.address.port)
+      }
+      try {
+        //调用通用工具类Utils中的startServiceOnPort()方法来启动NettyRpcEnv。
+        Utils.startServiceOnPort(config.port, startNettyRpcEnv, sparkConf, config.name)._1
+      } catch {
+        case NonFatal(e) =>
+          nettyEnv.shutdown()
+          throw e
+      }
+    }
+    nettyEnv
+  }
+```
+5. NettyRpcEnv中的属性成员  
+我们先不去看NettyRpcEnv类的细节，而是先看他内部包含哪些属性  
+```scala
+  //传输配置信息，作用类似于SparkConf，负责管理与RPC相关的所有配置
+  private[netty] val transportConf = SparkTransportConf.fromSparkConf(
+    conf.clone.set("spark.rpc.io.numConnectionsPerPeer", "1"),
+    "rpc",
+    conf.getInt("spark.rpc.io.threads", 0))
+  //调度器，h或者叫分发器，负责将消息路由到正确的RPC端点
+  private val dispatcher: Dispatcher = new Dispatcher(this, numUsableCores)
+  //流式管理器，用于处理RPC环境中的w文件，如自定义的配置文件或jar包
+  private val streamManager = new NettyStreamManager(this)
+  //传输上下文，作用类似于SparkContext至于Spark.负责管理RPC的服务端(TransportServer)与客户端(TransportClient)与它们之间的Netty传输管道
+  private val transportContext = new TransportContext(transportConf, new NettyRpcHandler(dispatcher, this, streamManager))
+  //创建RPCk客户端的额工程类
+  private val clientFactory = transportContext.createClientFactory(createClientBootstraps())
+  @volatile private var fileDownloadFactory: TransportClientFactory = _
+  val timeoutScheduler = ThreadUtils.newDaemonSingleThreadScheduledExecutor("netty-rpc-env-timeout")
+  private[netty] val clientConnectionExecutor = ThreadUtils.newDaemonCachedThreadPool(
+    "netty-rpc-connection",
+    conf.getInt("spark.rpc.connect.threads", 64))
+  //RPC环境中的服务端，负责提供基础且高效的流式服务。
+  @volatile private var server: TransportServer = _
+  private val stopped = new AtomicBoolean(false)
+  private val outboxes = new ConcurrentHashMap[RpcAddress, Outbox]()
+```
+TransportConf和TransportContext提供底层的基于Netty的RPC机制，TransportClient和TransportServer则是RPC端点的最低级别抽象。
 >由于在RDD的一系操作中，**如果一些连续的操作都是窄依赖操作的话，那么它们的执行是可以并行的，这一系列操作会形成pipeline的形式去处理数据**，而宽依赖则不行。<br/>
 >Spark中的Stage的划分就是以宽依赖来划分的，将一个Job(一个Action操作会生成一个Job，有多少个Action就有多少个Job)划分成多个Stage，一个Stage里面的任务，被抽象成TaskSet，一个TaskSet中包含很多Task(一个Partition对应一个Task)，同一个Stage中的Task的操作逻辑是相同的，只是要处理的数据不同
 1. TaskScheduler
