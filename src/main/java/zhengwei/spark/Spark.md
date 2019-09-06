@@ -1427,76 +1427,76 @@ private class AsyncEventQueue(
 * dispatchThread：是将队列中的事件分发到各监听器的守护线程，实际上调用了dispatch()分发，而Utils.tryOrStopSparkContext()方法的作用在于执行代码块时如果抛出异常，就另外起一个线程关闭SparkContext。  
 下面来看下 `org.apache.spark.scheduler.AsyncEventQueue#dispatch` 方法的源代码：
 ```scala
-  private def dispatch(): Unit = LiveListenerBus.withinListenerThread.withValue(true) {
-    var next: SparkListenerEvent = eventQueue.take()
-    //循环去队列中取事件
-    while (next != POISON_PILL) {
-      val ctx = processingTime.time()
-      try {
-        //调用父类ListenerBus特质中的postToAll()方法，将其投递给所有已经注册的监听器
-        super.postToAll(next)
-      } finally {
-        ctx.stop()
-      }
-      //减少待处理事件的计数器的值
-      eventCount.decrementAndGet()
-      //获取下一个事件
-      next = eventQueue.take()
+private def dispatch(): Unit = LiveListenerBus.withinListenerThread.withValue(true) {
+  var next: SparkListenerEvent = eventQueue.take()
+  //循环去队列中取事件
+  while (next != POISON_PILL) {
+    val ctx = processingTime.time()
+    try {
+      //调用父类ListenerBus特质中的postToAll()方法，将其投递给所有已经注册的监听器
+      super.postToAll(next)
+    } finally {
+      ctx.stop()
     }
+    //减少待处理事件的计数器的值
     eventCount.decrementAndGet()
+    //获取下一个事件
+    next = eventQueue.take()
   }
-  private object AsyncEventQueue {
-    val POISON_PILL = new SparkListenerEvent() { }
-  }
+  eventCount.decrementAndGet()
+}
+private object AsyncEventQueue {
+  val POISON_PILL = new SparkListenerEvent() { }
+}
 ```
 POISON_PILL(毒药丸)是AsyncEventQueue的伴生对象中定义的一个空的SparkListenerEvent，在队列停止时(即stop方法被调用的时候)会被放进队列中，当dispatchThread取得这个空对象的时候就会"中毒"退出  
 上面是从队列中获取事件的方法，接下来看下往队列中加入事件的方法。
 即 `org.apache.spark.scheduler.AsyncEventQueue.post` 方法的源码如下：
 ```scala
-  def post(event: SparkListenerEvent): Unit = {
-    //检查队列是否已经停止了，若停止了则直接退出，没有停止则尝试往队列中放入事件
-    if (stopped.get()) {
-      return
-    }
-    //待处理事件的计数器+1
-    eventCount.incrementAndGet()
-    //offer方法是将一个元素插到队尾，如果插入成功则返回true，如果失败则返回false
-    if (eventQueue.offer(event)) {
-      //添加事件成功不再进行剩下的逻辑
-      return
-    }
-    //添加事件失败，待处理事件计数器-1
-    eventCount.decrementAndGet()
-    //丢弃事件的度量器计数器+1
-    droppedEvents.inc()
-    //丢弃事件的计数器+1
-    droppedEventsCounter.incrementAndGet()
-    if (logDroppedEvent.compareAndSet(false, true)) {
-      // Only log the following message once to avoid duplicated annoying logs.
-      logError(s"Dropping event from queue $name. " +
-        "This likely means one of the listeners is too slow and cannot keep up with " +
-        "the rate at which tasks are being started by the scheduler.")
-    }
-    logTrace(s"Dropping event $event")
+def post(event: SparkListenerEvent): Unit = {
+  //检查队列是否已经停止了，若停止了则直接退出，没有停止则尝试往队列中放入事件
+  if (stopped.get()) {
+    return
+  }
+  //待处理事件的计数器+1
+  eventCount.incrementAndGet()
+  //offer方法是将一个元素插到队尾，如果插入成功则返回true，如果失败则返回false
+  if (eventQueue.offer(event)) {
+    //添加事件成功不再进行剩下的逻辑
+    return
+  }
+  //添加事件失败，待处理事件计数器-1
+  eventCount.decrementAndGet()
+  //丢弃事件的度量器计数器+1
+  droppedEvents.inc()
+  //丢弃事件的计数器+1
+  droppedEventsCounter.incrementAndGet()
+  if (logDroppedEvent.compareAndSet(false, true)) {
+    // Only log the following message once to avoid duplicated annoying logs.
+    logError(s"Dropping event from queue $name. " +
+      "This likely means one of the listeners is too slow and cannot keep up with " +
+      "the rate at which tasks are being started by the scheduler.")
+  }
+  logTrace(s"Dropping event $event")
 
-    val droppedCount = droppedEventsCounter.get
-    if (droppedCount > 0) {
-      // Don't log too frequently
-      // 如果离上次打印丢弃事件数的时间间隔大于1分钟的话就再次打印一次
-      if (System.currentTimeMillis() - lastReportTimestamp >= 60 * 1000) {
-        // There may be multiple threads trying to decrease droppedEventsCounter.
-        // Use "compareAndSet" to make sure only one thread can win.
-        // And if another thread is increasing droppedEventsCounter, "compareAndSet" will fail and
-        // then that thread will update it.
-        if (droppedEventsCounter.compareAndSet(droppedCount, 0)) {
-          val prevLastReportTimestamp = lastReportTimestamp
-          lastReportTimestamp = System.currentTimeMillis()
-          val previous = new java.util.Date(prevLastReportTimestamp)
-          logWarning(s"Dropped $droppedCount events from $name since $previous.")
-        }
+  val droppedCount = droppedEventsCounter.get
+  if (droppedCount > 0) {
+    // Don't log too frequently
+    // 如果离上次打印丢弃事件数的时间间隔大于1分钟的话就再次打印一次
+    if (System.currentTimeMillis() - lastReportTimestamp >= 60 * 1000) {
+      // There may be multiple threads trying to decrease droppedEventsCounter.
+      // Use "compareAndSet" to make sure only one thread can win.
+      // And if another thread is increasing droppedEventsCounter, "compareAndSet" will fail and
+      // then that thread will update it.
+      if (droppedEventsCounter.compareAndSet(droppedCount, 0)) {
+        val prevLastReportTimestamp = lastReportTimestamp
+        lastReportTimestamp = System.currentTimeMillis()
+        val previous = new java.util.Date(prevLastReportTimestamp)
+        logWarning(s"Dropped $droppedCount events from $name since $previous.")
       }
     }
   }
+}
 ```
 2. LiveListenerBus(异步时间总线)   
 AsyncEventQueue继承了SparkListenerBus特质，LiveListenerBus把AsyncEventQueue作为核心。以下是LiveListenerBus的源码  
@@ -1521,68 +1521,68 @@ private[spark] class LiveListenerBus(conf: SparkConf) {
 LiveListenerBus作为一个事件总线，必须监听器注册，事件投递等功能，这些都是在AsyncEventQueue基础上去做的。  
 首先看下 `org.apache.spark.scheduler.LiveListenerBus.addToQueue` 的代码
 ```scala
-  private[spark] def addToQueue(
-      listener: SparkListenerInterface,
-      //监听器队列的名字
-      queue: String): Unit = synchronized {
-    if (stopped.get()) {
-      throw new IllegalStateException("LiveListenerBus is stopped.")
-    }
-    queues.asScala.find(_.name == queue) match {
-      //queue->AsyncEventQueue
-      case Some(queue: AsyncEventQueue) =>
-        //往AsyncEventQueue中注册监听器
-        queue.addListener(listener)
-      //没有匹配到相同名字的AsyncEventQueue
-      case None = >
-        //新建一个新的AsyncEventQueue
-        val newQueue = new AsyncEventQueue(queue, conf, metrics, this)
-        //往新建的AsyncEventQueue中注册监听器
-        newQueue.addListener(listener)
-        if (started.get()) {
-          //启动新建的队列
-          newQueue.start(sparkContext)
-        }
-        //把新建的队列加入到queues中
-        queues.add(newQueue)
-    }
+private[spark] def addToQueue(
+    listener: SparkListenerInterface,
+    //监听器队列的名字
+    queue: String): Unit = synchronized {
+  if (stopped.get()) {
+    throw new IllegalStateException("LiveListenerBus is stopped.")
   }
+  queues.asScala.find(_.name == queue) match {
+    //queue->AsyncEventQueue
+    case Some(queue: AsyncEventQueue) =>
+      //往AsyncEventQueue中注册监听器
+      queue.addListener(listener)
+    //没有匹配到相同名字的AsyncEventQueue
+    case None = >
+      //新建一个新的AsyncEventQueue
+      val newQueue = new AsyncEventQueue(queue, conf, metrics, this)
+      //往新建的AsyncEventQueue中注册监听器
+      newQueue.addListener(listener)
+      if (started.get()) {
+        //启动新建的队列
+        newQueue.start(sparkContext)
+      }
+      //把新建的队列加入到queues中
+      queues.add(newQueue)
+  }
+}
 ```
 该方法将监听器注册到队列中去。他会去成员变量queues中去寻找是否存在相同队列名的队列，如果相同名称的队列存在的话，那么就调用父类ListenerBus的addListener()方法注册监听器；  
 如果没有名称相同的监听器，则生成一个新的AsyncEventQueue队列，然后把监听器注册到新的队列中去。  
 投递事件的相关方法如下， `org.apache.spark.scheduler.LiveListenerBus.post` 和 `org.apache.spark.scheduler.LiveListenerBus#postToQueues` 方法如下：
 ```scala
-  /** Post an event to all queues. */
-  def post(event: SparkListenerEvent): Unit = {
-    if (stopped.get()) {
-      return
-    }
-    metrics.numEventsPosted.inc()
-    // If the event buffer is null, it means the bus has been started and we can avoid
-    // synchronization and post events directly to the queues. This should be the most
-    // common case during the life of the bus.
-    if (queuedEvents == null) {
-      postToQueues(event)
-      return
-    }
-    // Otherwise, need to synchronize to check whether the bus is started, to make sure the thread
-    // calling start() picks up the new event.
-    synchronized {
-      if (!started.get()) {
-        queuedEvents += event
-        return
-      }
-    }
-    // If the bus was already started when the check above was made, just post directly to the
-    // queues.
+/** Post an event to all queues. */
+def post(event: SparkListenerEvent): Unit = {
+  if (stopped.get()) {
+    return
+  }
+  metrics.numEventsPosted.inc()
+  // If the event buffer is null, it means the bus has been started and we can avoid
+  // synchronization and post events directly to the queues. This should be the most
+  // common case during the life of the bus.
+  if (queuedEvents == null) {
     postToQueues(event)
+    return
   }
-  private def postToQueues(event: SparkListenerEvent): Unit = {
-    val it = queues.iterator()
-    while (it.hasNext()) {
-      it.next().post(event)
+  // Otherwise, need to synchronize to check whether the bus is started, to make sure the thread
+  // calling start() picks up the new event.
+  synchronized {
+    if (!started.get()) {
+      queuedEvents += event
+      return
     }
   }
+  // If the bus was already started when the check above was made, just post directly to the
+  // queues.
+  postToQueues(event)
+}
+private def postToQueues(event: SparkListenerEvent): Unit = {
+  val it = queues.iterator()
+  while (it.hasNext()) {
+    it.next().post(event)
+  }
+}
 ```
 post()方法会检查queuedEvents中有无缓存的事件，以及事件总线是否还没有启动。投递时会调用postToQueues()方法，将事件发送给所有队列，由AsyncEventQueue来完成投递到监听器的工作。
 ##### 2.SparkEnv(Spark运行时环境)
@@ -1591,85 +1591,85 @@ SparkEnv初始化之后，与Spark相关的计算、存储和度量系统才会�
 ###### SparkEnv入口
 Driver环境的创建是通过 `org.apache.spark.SparkEnv.createDriverEnv` 方法来创建的，代码如下：
 ```scala
-  private[spark] def createDriverEnv(
-      conf: SparkConf,
-      isLocal: Boolean,
-      //数据总线
-      listenerBus: LiveListenerBus,
-      //申请的核心数
-      numCores: Int,
-      mockOutputCommitCoordinator: Option[OutputCommitCoordinator] = None): SparkEnv = {
-    assert(conf.contains(DRIVER_HOST_ADDRESS),
-      s"${DRIVER_HOST_ADDRESS.key} is not set on the driver!")
-    assert(conf.contains("spark.driver.port"), "spark.driver.port is not set on the driver!")
-    val bindAddress = conf.get(DRIVER_BIND_ADDRESS)
-    val advertiseAddress = conf.get(DRIVER_HOST_ADDRESS)
-    val port = conf.get("spark.driver.port").toInt
-    val ioEncryptionKey = if (conf.get(IO_ENCRYPTION_ENABLED)) {
-      Some(CryptoStreamUtils.createKey(conf))
-    } else {
-      None
-    }
-    create(
-      conf,
-      SparkContext.DRIVER_IDENTIFIER,
-      bindAddress,
-      advertiseAddress,
-      Option(port),
-      isLocal,
-      numCores,
-      ioEncryptionKey,
-      listenerBus = listenerBus,
-      mockOutputCommitCoordinator = mockOutputCommitCoordinator
-    )
+private[spark] def createDriverEnv(
+    conf: SparkConf,
+    isLocal: Boolean,
+    //数据总线
+    listenerBus: LiveListenerBus,
+    //申请的核心数
+    numCores: Int,
+    mockOutputCommitCoordinator: Option[OutputCommitCoordinator] = None): SparkEnv = {
+  assert(conf.contains(DRIVER_HOST_ADDRESS),
+    s"${DRIVER_HOST_ADDRESS.key} is not set on the driver!")
+  assert(conf.contains("spark.driver.port"), "spark.driver.port is not set on the driver!")
+  val bindAddress = conf.get(DRIVER_BIND_ADDRESS)
+  val advertiseAddress = conf.get(DRIVER_HOST_ADDRESS)
+  val port = conf.get("spark.driver.port").toInt
+  val ioEncryptionKey = if (conf.get(IO_ENCRYPTION_ENABLED)) {
+    Some(CryptoStreamUtils.createKey(conf))
+  } else {
+    None
   }
+  create(
+    conf,
+    SparkContext.DRIVER_IDENTIFIER,
+    bindAddress,
+    advertiseAddress,
+    Option(port),
+    isLocal,
+    numCores,
+    ioEncryptionKey,
+    listenerBus = listenerBus,
+    mockOutputCommitCoordinator = mockOutputCommitCoordinator
+  )
+}
 ```
 `org.apache.spark.SparkEnv.createExecutorEnv` 是创建Executor的运行环境，代码如下：
 ```scala
-  private[spark] def createExecutorEnv(
-      conf: SparkConf,
-      executorId: String,
-      hostname: String,
-      numCores: Int,
-      ioEncryptionKey: Option[Array[Byte]],
-      isLocal: Boolean): SparkEnv = {
-    val env = create(
-      conf,
-      executorId,
-      hostname,
-      hostname,
-      None,
-      isLocal,
-      numCores,
-      ioEncryptionKey
-    )
-    SparkEnv.set(env)
-    env
-  }
+private[spark] def createExecutorEnv(
+    conf: SparkConf,
+    executorId: String,
+    hostname: String,
+    numCores: Int,
+    ioEncryptionKey: Option[Array[Byte]],
+    isLocal: Boolean): SparkEnv = {
+  val env = create(
+    conf,
+    executorId,
+    hostname,
+    hostname,
+    None,
+    isLocal,
+    numCores,
+    ioEncryptionKey
+  )
+  SparkEnv.set(env)
+  env
+}
 ```
 创建Driver和Executor环境的时候最终都是调用的 `org.apache.spark.SparkEnv$#create` 方法去创建。首先看下这个方法的签名，签名如下：
 ```scala
-  /**
-   * Helper method to create a SparkEnv for a driver or an executor.
-   */
-  private def create(
-      conf: SparkConf,
-      //executor的唯一标识，如果driver的话则是driver字符串
-      executorId: String,
-      //监听Socket的绑定端口
-      bindAddress: String,
-      //RPC端点地址
-      advertiseAddress: String,
-      //监听的端口号
-      port: Option[Int],
-      //是否是本地模式
-      isLocal: Boolean, 
-      //分配driver或executor的核心数
-      numUsableCores: Int,
-      //I/O加密的密钥，当spark.io.encryption.enable配置项启用时才有效
-      ioEncryptionKey: Option[Array[Byte]],
-      listenerBus: LiveListenerBus = null,
-      mockOutputCommitCoordinator: Option[OutputCommitCoordinator] = None): SparkEnv
+/**
+ * Helper method to create a SparkEnv for a driver or an executor.
+ */
+private def create(
+    conf: SparkConf,
+    //executor的唯一标识，如果driver的话则是driver字符串
+    executorId: String,
+    //监听Socket的绑定端口
+    bindAddress: String,
+    //RPC端点地址
+    advertiseAddress: String,
+    //监听的端口号
+    port: Option[Int],
+    //是否是本地模式
+    isLocal: Boolean, 
+    //分配driver或executor的核心数
+    numUsableCores: Int,
+    //I/O加密的密钥，当spark.io.encryption.enable配置项启用时才有效
+    ioEncryptionKey: Option[Array[Byte]],
+    listenerBus: LiveListenerBus = null,
+    mockOutputCommitCoordinator: Option[OutputCommitCoordinator] = None): SparkEnv
 ```
 ###### SparkEnv初始化
 按照 `org.apache.spark.SparkEnv#create` 方法中的顺序依次查看SparkEnv中初始化的组件
@@ -1755,8 +1755,7 @@ val shortShuffleMgrNames = Map(
   "sort" -> classOf[org.apache.spark.shuffle.sort.SortShuffleManager].getName,
   "tungsten-sort" -> classOf[org.apache.spark.shuffle.sort.SortShuffleManager].getName)
 val shuffleMgrName = conf.get("spark.shuffle.manager", "sort")
-val shuffleMgrClass =
-  shortShuffleMgrNames.getOrElse(shuffleMgrName.toLowerCase(Locale.ROOT), shuffleMgrName)
+val shuffleMgrClass = shortShuffleMgrNames.getOrElse(shuffleMgrName.toLowerCase(Locale.ROOT), shuffleMgrName)
 val shuffleManager = instantiateClass[ShuffleManager](shuffleMgrClass)
 ```
 ShuffleManager的种类可以通过配置项spark.shuffle.manager设置，默认为sort，即SortShuffleManager。  
@@ -1784,8 +1783,7 @@ val blockManagerPort = if (isDriver) {
   conf.get(BLOCK_MANAGER_PORT)
 }
 val blockTransferService =
-  new NettyBlockTransferService(conf, securityManager, bindAddress, advertiseAddress,
-    blockManagerPort, numUsableCores)
+  new NettyBlockTransferService(conf, securityManager, bindAddress, advertiseAddress, blockManagerPort, numUsableCores)
 val blockManagerMaster = new BlockManagerMaster(registerOrLookupEndpoint(
   BlockManagerMaster.DRIVER_ENDPOINT_NAME,
   new BlockManagerMasterEndpoint(rpcEnv, isLocal, conf, listenerBus)),
@@ -2075,31 +2073,98 @@ RpcEndpointRef只有一个子类，那就是 `org.apache.spark.rpc.netty.NettyRp
 5. NettyRpcEnv中的属性成员  
 我们先不去看NettyRpcEnv类的细节，而是先看他内部包含哪些属性  
 ```scala
-  //传输配置信息，作用类似于SparkConf，负责管理与RPC相关的所有配置
-  private[netty] val transportConf = SparkTransportConf.fromSparkConf(
-    conf.clone.set("spark.rpc.io.numConnectionsPerPeer", "1"),
-    "rpc",
-    conf.getInt("spark.rpc.io.threads", 0))
-  //调度器，h或者叫分发器，负责将消息路由到正确的RPC端点
-  private val dispatcher: Dispatcher = new Dispatcher(this, numUsableCores)
-  //流式管理器，用于处理RPC环境中的w文件，如自定义的配置文件或jar包
-  private val streamManager = new NettyStreamManager(this)
-  //传输上下文，作用类似于SparkContext至于Spark.负责管理RPC的服务端(TransportServer)与客户端(TransportClient)与它们之间的Netty传输管道
-  private val transportContext = new TransportContext(transportConf, new NettyRpcHandler(dispatcher, this, streamManager))
-  //创建RPCk客户端的额工程类
-  private val clientFactory = transportContext.createClientFactory(createClientBootstraps())
-  @volatile private var fileDownloadFactory: TransportClientFactory = _
-  val timeoutScheduler = ThreadUtils.newDaemonSingleThreadScheduledExecutor("netty-rpc-env-timeout")
-  private[netty] val clientConnectionExecutor = ThreadUtils.newDaemonCachedThreadPool(
-    "netty-rpc-connection",
-    conf.getInt("spark.rpc.connect.threads", 64))
-  //RPC环境中的服务端，负责提供基础且高效的流式服务。
-  @volatile private var server: TransportServer = _
-  private val stopped = new AtomicBoolean(false)
-  private val outboxes = new ConcurrentHashMap[RpcAddress, Outbox]()
+//传输配置信息，作用类似于SparkConf，负责管理与RPC相关的所有配置
+private[netty] val transportConf = SparkTransportConf.fromSparkConf(
+  conf.clone.set("spark.rpc.io.numConnectionsPerPeer", "1"),
+  "rpc",
+  conf.getInt("spark.rpc.io.threads", 0))
+//调度器，h或者叫分发器，负责将消息路由到正确的RPC端点
+private val dispatcher: Dispatcher = new Dispatcher(this, numUsableCores)
+//流式管理器，用于处理RPC环境中的w文件，如自定义的配置文件或jar包
+private val streamManager = new NettyStreamManager(this)
+//传输上下文，作用类似于SparkContext至于Spark.负责管理RPC的服务端(TransportServer)与客户端(TransportClient)与它们之间的Netty传输管道
+private val transportContext = new TransportContext(transportConf, new NettyRpcHandler(dispatcher, this, streamManager))
+//创建RPCk客户端的额工程类
+private val clientFactory = transportContext.createClientFactory(createClientBootstraps())
+@volatile private var fileDownloadFactory: TransportClientFactory = _
+val timeoutScheduler = ThreadUtils.newDaemonSingleThreadScheduledExecutor("netty-rpc-env-timeout")
+private[netty] val clientConnectionExecutor = ThreadUtils.newDaemonCachedThreadPool(
+  "netty-rpc-connection",
+  conf.getInt("spark.rpc.connect.threads", 64))
+//RPC环境中的服务端，负责提供基础且高效的流式服务。
+@volatile private var server: TransportServer = _
+private val stopped = new AtomicBoolean(false)
+private val outboxes = new ConcurrentHashMap[RpcAddress, Outbox]()
 ```
 TransportConf和TransportContext提供底层的基于Netty的RPC机制，TransportClient和TransportServer则是RPC端点的最低级别抽象。
->由于在RDD的一系操作中，**如果一些连续的操作都是窄依赖操作的话，那么它们的执行是可以并行的，这一系列操作会形成pipeline的形式去处理数据**，而宽依赖则不行。<br/>
+    1. NettyRpcEnv中重要的组件-Dispatcher类  
+    Dispatcher类中的属性不是很多，但是都比较重要，其属性声明如下：
+    ```scala
+    private val endpoints: ConcurrentMap[String, EndpointData] = new ConcurrentHashMap[String, EndpointData]
+    private val endpointRefs: ConcurrentMap[RpcEndpoint, RpcEndpointRef] =  new ConcurrentHashMap[RpcEndpoint, RpcEndpointRef]
+    private val receivers = new LinkedBlockingQueue[EndpointData]
+    private val threadpool: ThreadPoolExecutor = {
+      val availableCores = if (numUsableCores > 0) numUsableCores else Runtime.getRuntime.availableProcessors()
+      val numThreads = nettyEnv.conf.getInt("spark.rpc.netty.dispatcher.numThreads", math.max(2, availableCores))
+      //守护线程池
+      val pool = ThreadUtils.newDaemonFixedThreadPool(numThreads, "dispatcher-event-loop")
+      for (i <- 0 until numThreads) {
+        pool.execute(new MessageLoop)
+      }
+      pool
+    }
+    ```
+    endpoints和endpointRefs这两个属性分别用ConcurentHashMap来维护RpcEndpointData的名称和RpcEdnpointData；RpcEndpoint和RpcEndpointRef端点引用。  
+    receivers存储端点数据的阻塞队列，只有当RPC端点收到要处理的数据的时候，才会被放到阻塞队列中，空闲额RPC端点是不会放进去的。  
+    threadPool一个用来调度消息的固定大小的守护线程池，该线程池中的线程的数量由 `spark.rpc.netty.dispatcher.numThreads` 决定，默认值1或2(取决于服务器是否只有一个可用线程)。这个线程池内跑的线程都是MessageLoop类型。
+        1. EndpointData  
+        EndpointData是Dispatcher的私有内部类。它的实现也很简单，其代码如下：
+        ```scala
+        private class EndpointData(
+            val name: String,
+            val endpoint: RpcEndpoint,
+            val ref: NettyRpcEndpointRef) {
+          val inbox = new Inbox(ref, endpoint)
+        }
+        ```
+        EndpointData接收三个参数，RPC端点名称，RPC端点实例和RPC端点引用，然后构建出一个Inbox对象，什么是Inbox?可以理解为"收件箱"，每个RPC端点都有对应的收件箱，里面采用链表维护着它们收到并且要处理的消息，这些消息均继承自InboxMessage特质。
+        2. Dispatcher的调度逻辑  
+            1. MessageLoop的实现  
+            从上面的描述中可以知道，Dispatcher线程池中执行的都是MessageLoop，它是一个内部类，来看他的代码：
+            ```scala
+            private class MessageLoop extends Runnable {
+              override def run(): Unit = {
+                try {
+                  while (true) {
+                    try {
+                      //从receivers阻塞队列中获取需要处理的数据
+                      val data = receivers.take()
+                      if (data == PoisonPill) {
+                        // Put PoisonPill back so that other MessageLoops can see it.
+                        receivers.offer(PoisonPill)
+                        return
+                      }
+                      data.inbox.process(Dispatcher.this)
+                    } catch {
+                      case NonFatal(e) => logError(e.getMessage, e)
+                    }
+                  }
+                } catch {
+                  case _: InterruptedException => // exit
+                  case t: Throwable =>
+                    try {
+                      // Re-submit a MessageLoop so that Dispatcher will still work if
+                      // UncaughtExceptionHandler decides to not kill JVM.
+                      threadpool.execute(new MessageLoop)
+                    } finally {
+                      throw t
+                    }
+                }
+              }
+            }
+            ```
+            可以看出MessageLoop本质上是一个不断循环处理消息的线程，它每次从阻塞队列中，
+>由于在RDD的一系操作中，**如果一些连续的操作都是窄依赖操作的话，那么它们的执行是可以并行的，这一系列操作会形成pipeline的形式去处理数据**，而宽依赖则不行。  
 >Spark中的Stage的划分就是以宽依赖来划分的，将一个Job(一个Action操作会生成一个Job，有多少个Action就有多少个Job)划分成多个Stage，一个Stage里面的任务，被抽象成TaskSet，一个TaskSet中包含很多Task(一个Partition对应一个Task)，同一个Stage中的Task的操作逻辑是相同的，只是要处理的数据不同
 1. TaskScheduler
     1. 创建TaskScheduler
