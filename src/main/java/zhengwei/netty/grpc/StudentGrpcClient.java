@@ -5,6 +5,7 @@ import io.grpc.ManagedChannelBuilder;
 import io.grpc.stub.StreamObserver;
 import zhengwei.netty.grpc.proto.*;
 
+import java.time.LocalDateTime;
 import java.util.Iterator;
 import java.util.concurrent.TimeUnit;
 
@@ -48,7 +49,7 @@ public class StudentGrpcClient {
 		StreamObserver<StudentResponseList> studentResponseListStreamObserver = new StreamObserver<StudentResponseList>() {
 			@Override
 			public void onNext(StudentResponseList studentResponseList) {
-				studentResponseList.getStudetnResponseList().forEach(studentResponse -> {
+				studentResponseList.getStudentResponseList().forEach(studentResponse -> {
 					System.out.println(studentResponse.getName());
 					System.out.println(studentResponse.getAge());
 					System.out.println(studentResponse.getCity());
@@ -66,12 +67,36 @@ public class StudentGrpcClient {
 				System.out.println("completed");
 			}
 		};
-		StreamObserver<StudentRequest> studentRequestStreamObserver= stub.getStudentsWrapperByAgs(studentResponseListStreamObserver);
+		StreamObserver<StudentRequest> studentRequestStreamObserver = stub.getStudentsWrapperByArgs(studentResponseListStreamObserver);
 		studentRequestStreamObserver.onNext(StudentRequest.newBuilder().setAge(18).build());
 		studentRequestStreamObserver.onNext(StudentRequest.newBuilder().setAge(19).build());
 		studentRequestStreamObserver.onNext(StudentRequest.newBuilder().setAge(20).build());
 		studentRequestStreamObserver.onNext(StudentRequest.newBuilder().setAge(21).build());
 		studentRequestStreamObserver.onCompleted();
+	}
+
+	private void biTalk() throws InterruptedException {
+		StreamObserver<StreamRequest> requestStreamObserver=stub.biTalk(new StreamObserver<StreamResponse>() {
+			//收到服务器端的消息
+			@Override
+			public void onNext(StreamResponse streamResponse) {
+				System.out.println(streamResponse.getResponseInfo());
+			}
+
+			@Override
+			public void onError(Throwable throwable) {
+				System.out.println(throwable.getMessage());
+			}
+
+			@Override
+			public void onCompleted() {
+				System.out.println("completed");
+			}
+		});
+		for (int i = 0; i < 10; i++) {
+			requestStreamObserver.onNext(StreamRequest.newBuilder().setRequestInfo(LocalDateTime.now().toString()).build());
+			Thread.sleep(1_000L);
+		}
 	}
 
 	public static void main(String[] args) throws InterruptedException {
@@ -89,8 +114,9 @@ public class StudentGrpcClient {
 				System.out.println(x.getAge());
 				System.out.println(x.getCity());
 			});*/
-			client.getStudentsWrapperByAgs();
-			Thread.sleep(5000);
+			/*client.getStudentsWrapperByAgs();
+			Thread.sleep(5000);*/
+			client.biTalk();
 		} finally {
 			client.shutdown();
 		}

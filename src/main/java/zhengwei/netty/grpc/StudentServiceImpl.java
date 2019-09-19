@@ -3,6 +3,8 @@ package zhengwei.netty.grpc;
 import io.grpc.stub.StreamObserver;
 import zhengwei.netty.grpc.proto.*;
 
+import java.util.UUID;
+
 /**
  * @author zhengwei AKA Awei
  * @since 2019/9/11 19:19
@@ -40,7 +42,7 @@ public class StudentServiceImpl extends StudentServiceGrpc.StudentServiceImplBas
 	 * 在特定的时候方法将会被调用
 	 */
 	@Override
-	public StreamObserver<StudentRequest> getStudentsWrapperByAgs(StreamObserver<StudentResponseList> responseObserver) {
+	public StreamObserver<StudentRequest> getStudentsWrapperByArgs(StreamObserver<StudentResponseList> responseObserver) {
 		return new StreamObserver<StudentRequest>() {
 			//以下方法都是针对客户端处理的
 			//处理请求
@@ -60,10 +62,31 @@ public class StudentServiceImpl extends StudentServiceGrpc.StudentServiceImplBas
 				StudentResponse response2 = StudentResponse.newBuilder().setName("zhengwei2").setAge(18).setCity("NJ").build();
 				StudentResponseList list = StudentResponseList
 						.newBuilder()
-						.addStudetnResponse(response1)
-						.addStudetnResponse(response2)
+						.addStudentResponse(response1)
+						.addStudentResponse(response2)
 						.build();
 				responseObserver.onNext(list);
+				responseObserver.onCompleted();
+			}
+		};
+	}
+
+	@Override
+	public StreamObserver<StreamRequest> biTalk(StreamObserver<StreamResponse> responseObserver) {
+		return new StreamObserver<StreamRequest>() {
+			@Override
+			public void onNext(StreamRequest streamRequest) {
+				System.out.println(streamRequest.getRequestInfo());
+				responseObserver.onNext(StreamResponse.newBuilder().setResponseInfo(UUID.randomUUID().toString()).build());
+			}
+
+			@Override
+			public void onError(Throwable throwable) {
+				System.out.println(throwable.getMessage());
+			}
+
+			@Override
+			public void onCompleted() {
 				responseObserver.onCompleted();
 			}
 		};
