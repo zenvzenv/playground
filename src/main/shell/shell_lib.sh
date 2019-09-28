@@ -43,3 +43,9 @@ dirname() {
     tmp=${tmp%%"${tmp##*[!/]}"}
     printf '%s\n' "${tmp:-/}"
 }
+#获取文件的行数，替代wc -l
+lines() {
+    # Usage: lines "file"
+    mapfile -tn 0 lines < "$1"
+    printf '%s\n' "${#lines[@]}"
+}
