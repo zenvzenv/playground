@@ -766,7 +766,7 @@ private val nextRddId = new AtomicInteger(0)</pre>
 
 
 ## LinstenerBus
-> topicLinkUID=`16D7C7C517FA`
+> collapsed=`true`,topicLinkUID=`16D7C7C517FA`
 
 - NOTE
 <pre>SparkContext初始化时，第一个初始化的组件就是ListenerBus
@@ -777,36 +777,52 @@ private val nextRddId = new AtomicInteger(0)</pre>
 ### LinstenerBus底层维护一个CopyOnWriteArrayList集合
 
 ### 重要方法
+> collapsed=`true`
+
 
 #### addListener\(\)
+> collapsed=`true`
+
 
 ##### 向ListenerBus注册监听器，直接操作CopyOnWriteArrayList，所以线程安全
 
 #### removeListener\(\)
+> collapsed=`true`
+
 
 ##### 将监听器从ListenerBus中移除，直接操作CopyOnWriteArrayList，所以线程安全
 
 #### doPostEvent\(\)
+> collapsed=`true`
+
 
 ##### 将事件event投递给监听器listener进行处理，具体实现由子类实现
 
 #### postToAll\(\)
+> collapsed=`true`
+
 
 ##### 这个方法将调用doPostEvent\(\)方法，将事件投递给已注册的监听器
 
 ##### 此方法是线程不安全的，在调用时需要确保只有一个线程进行调用
 
 #### post\(\)
+> collapsed=`true`
+
 
 ##### 会检查queuedEvents中有无缓存事件和事件总线是否启动
 
 ##### 最终调用postToQueue\(\)方法将一个事件投递出去
 
-#### postToQueue\(\)
+#### postToQueues\(\)
+> collapsed=`true`
+
 
 ##### 将事件发送给所有队列，由AsyncEventQueue来完成投递到监听器的工作
 
 ##### 最终调用AsyncEventQueue的post方法，将事件投递出去
+- TOPIC
+<pre>16D7CDE0342A</pre>
 
 ### SparkListenerBus特质
 > collapsed=`true`
@@ -905,7 +921,7 @@ private val nextRddId = new AtomicInteger(0)</pre>
 ######## 在队列停止时\(即stop方法被调用的时候\)会被放进队列中，当dispatchThread取得这个空对象的时候就会"中毒"退出 
 
 ###### post\(\)方法，向LinkedBlockingQueue中offer一个事件
-> collapsed=`true`
+> collapsed=`true`,topicLinkUID=`16D7CDE0342A`
 
 
 ####### 添加事件成功返回true，否则返回false
@@ -913,28 +929,40 @@ private val nextRddId = new AtomicInteger(0)</pre>
 ####### 内部会维护一些计数器，以便日志打印时输出，输出后清零
 
 ### LiveListenerBus\(异步事件总线\)
+> collapsed=`true`
+
 
 #### AsyncEventQueue是其核心
 - TOPIC
 <pre>16D7CBDCF66A</pre>
 
 #### 其中的大部分属性和AsyncEventQueue中大同小异
+> collapsed=`true`
+
 
 ##### queues
+> collapsed=`true`
+
 
 ###### private val queues = new CopyOnWriteArrayList\[AsyncEventQueue\]\(\)
 
 ###### 维护一个AsyncEventQueue的列表，也就是说LiveListenerBus中可以有多个事件队列，采用CopyOnWriteArrayList来保证线程安全
 
 ##### queuedEvent
+> collapsed=`true`
+
 
 ###### 维护一个SparkListenerEvent列表
 
 ###### 用途是在LiveListenerBus启动成功之前，可能已经有事件被投递，在启动之后，这些事件将首先被投递出去
 
 #### 重要方法
+> collapsed=`true`
+
 
 ##### addToQueue\(\)
+> collapsed=`true`
+
 - NOTE
 <pre>private[spark] def addToQueue(
     listener: SparkListenerInterface,
@@ -972,3 +1000,108 @@ private val nextRddId = new AtomicInteger(0)</pre>
 ###### 它会去成员变量queues中去寻找是否存在同名的队列\(AsyncEventQueue\)，如果存在，则调用AsyncEventQueue的父类SparkListenerBus的父类ListenerBus的addListener\(\)方法注册监听器
 
 ###### 如果没有相同的队列名的话，则会新建一个AsynvEventQueue，然后把监听器注册到队列中
+
+## SparkEnv
+> leftSide=`true`
+
+
+### SparkContext在初始化事件总线之后，就会去初始化SaprkEnv
+
+### SparkEnv初始化之后，与Spark相关的计算、存储和度量系统才会真正的准备好，SparkEnv中也包含很多的组件。
+> leftSide=`true`
+
+
+### Driver环境的创建
+> leftSide=`true`
+
+
+#### Dirver环境的创建是通过org\.apache\.spark\.SparkEnv\.createDriverEnv
+- NOTE
+<pre>private[spark] def createDriverEnv(
+    conf: SparkConf,
+    isLocal: Boolean,
+    //数据总线
+    listenerBus: LiveListenerBus,
+    //申请的核心数
+    numCores: Int,
+    mockOutputCommitCoordinator: Option[OutputCommitCoordinator] = None): SparkEnv = {
+  assert(conf.contains(DRIVER_HOST_ADDRESS),
+    s&quot;${DRIVER_HOST_ADDRESS.key} is not set on the driver!&quot;)
+  assert(conf.contains(&quot;spark.driver.port&quot;), &quot;spark.driver.port is not set on the driver!&quot;)
+  val bindAddress = conf.get(DRIVER_BIND_ADDRESS)
+  val advertiseAddress = conf.get(DRIVER_HOST_ADDRESS)
+  val port = conf.get(&quot;spark.driver.port&quot;).toInt
+  val ioEncryptionKey = if (conf.get(IO_ENCRYPTION_ENABLED)) {
+    Some(CryptoStreamUtils.createKey(conf))
+  } else {
+    None
+  }
+  create(
+    conf,
+    SparkContext.DRIVER_IDENTIFIER,
+    bindAddress,
+    advertiseAddress,
+    Option(port),
+    isLocal,
+    numCores,
+    ioEncryptionKey,
+    listenerBus = listenerBus,
+    mockOutputCommitCoordinator = mockOutputCommitCoordinator
+  )
+}</pre>
+
+### Executor环境创建
+> leftSide=`true`
+
+
+#### Executor环境的创建是通过org\.apache\.spark\.SparkEnv\.createExecutorEnv
+- NOTE
+<pre>private[spark] def createExecutorEnv(
+    conf: SparkConf,
+    executorId: String,
+    hostname: String,
+    numCores: Int,
+    ioEncryptionKey: Option[Array[Byte]],
+    isLocal: Boolean): SparkEnv = {
+  val env = create(
+    conf,
+    executorId,
+    hostname,
+    hostname,
+    None,
+    isLocal,
+    numCores,
+    ioEncryptionKey
+  )
+  SparkEnv.set(env)
+  env
+}</pre>
+
+### 初始化
+> leftSide=`true`
+
+
+#### SecurityManager
+
+### 重要方法
+
+#### create\(\)
+- NOTE
+<pre>private def create(
+    conf: SparkConf,
+    //executor的唯一标识，如果driver的话则是driver字符串
+    executorId: String,
+    //监听Socket的绑定端口
+    bindAddress: String,
+    //RPC端点地址
+    advertiseAddress: String,
+    //监听的端口号
+    port: Option[Int],
+    //是否是本地模式
+    isLocal: Boolean, 
+    //分配driver或executor的核心数
+    numUsableCores: Int,
+    //I/O加密的密钥，当spark.io.encryption.enable配置项启用时才有效
+    ioEncryptionKey: Option[Array[Byte]],
+    listenerBus: LiveListenerBus = null,
+    mockOutputCommitCoordinator: Option[OutputCommitCoordinator] = None): SparkEnv</pre>
