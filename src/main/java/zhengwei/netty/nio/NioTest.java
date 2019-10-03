@@ -9,6 +9,7 @@ import java.nio.ByteBuffer;
 import java.nio.IntBuffer;
 import java.nio.channels.FileChannel;
 import java.security.SecureRandom;
+import java.time.LocalDateTime;
 
 /**
  * @author zhengwei AKA Awei
@@ -17,18 +18,29 @@ import java.security.SecureRandom;
 public class NioTest {
 	private ByteBuffer buffer;
 
+	public static void main(String[] args) {
+		System.out.println(LocalDateTime.now());
+	}
+
 	@Test
 	void testNioBuffer() {
 		//缓冲区
 		IntBuffer buffer = IntBuffer.allocate(10);
-		for (int i = 0; i < buffer.capacity(); i++) {
+		for (int i = 0; i < buffer.capacity() / 2; i++) {
 			int random = new SecureRandom().nextInt(20);
 			buffer.put(random);
 		}
+		System.out.println("before flip,limit->" + buffer.limit());
 		//读写切换，把读转成写，把写转成读
 		buffer.flip();
+		System.out.println("after flip,limit->" + buffer.limit());
+		System.out.println("------------------------");
 		while (buffer.hasRemaining()) {
+			System.out.println("read capacity->" + buffer.capacity());
+			System.out.println("read limit->" + buffer.limit());
+			System.out.println("read position->" + buffer.position());
 			System.out.println(buffer.get());
+			System.out.println("------------------------");
 		}
 	}
 
@@ -65,6 +77,7 @@ public class NioTest {
 			e.printStackTrace();
 		}
 	}
+
 	@Test
 	void test1() {
 		//1.分配一个指定大小的缓冲区
@@ -74,22 +87,22 @@ public class NioTest {
 		System.out.println(byteBuffer.limit());
 		System.out.println(byteBuffer.capacity());
 		//2.利用put()存入数据
-		String str="abcd";
+		String str = "abcd";
 		byteBuffer.put(str.getBytes());
 		System.out.println("-------------put-----------------");
 		System.out.println(byteBuffer.position());
 		System.out.println(byteBuffer.limit());
 		System.out.println(byteBuffer.capacity());
-		//3.切换成读取数据的模式  filp()
+		//3.切换成读取数据的模式  flip()
 		byteBuffer.flip();//切换到读取数据的模式
-		System.out.println("-------------filp-----------------");
+		System.out.println("-------------flip-----------------");
 		System.out.println(byteBuffer.position());
 		System.out.println(byteBuffer.limit());
 		System.out.println(byteBuffer.capacity());
 		//4.读取缓存区的数据
-		byte[] dst=new byte[byteBuffer.limit()];
+		byte[] dst = new byte[byteBuffer.limit()];
 		byteBuffer.get(dst);
-		System.out.println("-------------filp-----------------");
+		System.out.println("-------------flip-----------------");
 		System.out.println(dst);
 		System.out.println(byteBuffer.position());
 		System.out.println(byteBuffer.limit());
@@ -120,4 +133,25 @@ public class NioTest {
 		byteBuffer.hasRemaining();//是否还有剩余可操作数据
 	}
 
+	@Test
+	void test() {
+		try (FileInputStream fis = new FileInputStream("e:/temp/netty/input.txt");
+		     FileOutputStream fos = new FileOutputStream("e:/temp/netty/output.txt")) {
+			FileChannel fisChannel = fis.getChannel();
+			FileChannel fosChannel = fos.getChannel();
+			ByteBuffer buffer = ByteBuffer.allocate(1024);
+			while (true) {
+				//如果把这行注释了，
+				buffer.clear();
+				int read = fisChannel.read(buffer);
+				if (read == -1) {
+					break;
+				}
+				buffer.flip();
+				fosChannel.write(buffer);
+			}
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}
 }
