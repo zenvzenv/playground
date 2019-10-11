@@ -23,7 +23,7 @@ public class DataChecker {
         int[] arr2=new int[arr1.length];
         System.arraycopy(arr1,0,arr2,0,arr1.length);
         Arrays.sort(arr1);
-        SelectionSort.sort(arr2);
+        SelectionSort.selectionSort(arr2);
         boolean flag=true;
         for (int i=0;i<arr1.length;i++){
             if (arr1[i]!=arr2[i]) flag=false;
