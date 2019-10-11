@@ -26,7 +26,6 @@ public class LeetCode17LetterCombinationsofAPhoneNumber {
 		map.put('9', Arrays.asList('w', 'x', 'y', 'z'));
 	}
 
-	@org.jetbrains.annotations.NotNull
 	static List<String> letterCombinations(String digits) {
 		List<String> result=new ArrayList<>();
 		DFS("",0,digits,result,map);
