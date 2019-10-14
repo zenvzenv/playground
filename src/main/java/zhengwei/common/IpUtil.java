@@ -169,7 +169,7 @@ public final class IpUtil {
 		if(4 != ipinfo.split("\\.").length || "".equals(netMask)){
 			return null;
 		}
-		System.out.println(ipinfo);
+//		System.out.println(ipinfo);
 		for (int i = 0; i < 4; i++) {
 			try{
 				String s = StringUtils.splitPreserveAllTokens(ipinfo,".")[i];

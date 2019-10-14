@@ -1005,7 +1005,7 @@ private val nextRddId = new AtomicInteger(0)</pre>
 > leftSide=`true`
 
 
-### SparkContext在初始化事件总线之后，就会去初始化SaprkEnv
+### SparkContext在初始化事件总线\(ListenerBus\)之后，就会去初始化SaprkEnv
 
 ### SparkEnv初始化之后，与Spark相关的计算、存储和度量系统才会真正的准备好，SparkEnv中也包含很多的组件。
 > leftSide=`true`
@@ -1105,3 +1105,198 @@ private val nextRddId = new AtomicInteger(0)</pre>
     ioEncryptionKey: Option[Array[Byte]],
     listenerBus: LiveListenerBus = null,
     mockOutputCommitCoordinator: Option[OutputCommitCoordinator] = None): SparkEnv</pre>
+
+##### 按初始化顺序依次介绍
+
+##### SecurityManager
+- NOTE
+<pre>val securityManager = new SecurityManager(conf, ioEncryptionKey)
+if (isDriver) {
+  securityManager.initializeAuth()
+}
+
+ioEncryptionKey.foreach { _ =&gt;
+  if (!securityManager.isEncryptionEnabled()) {
+    logWarning(&quot;I/O encryption enabled without RPC encryption: keys will be visible on the &quot; +
+      &quot;wire.&quot;)
+  }
+}</pre>
+
+###### 安全管理器
+
+###### 通过共享密钥的方式进行认证
+> leftSide=`true`
+
+
+###### 基于ACL\(Access Control List,访问控制列表\),来管理Spark内部账号和权限
+
+##### RpcEnv
+> leftSide=`true`
+
+- NOTE
+<pre>val systemName = if (isDriver) driverSystemName else executorSystemName
+val rpcEnv = RpcEnv.create(systemName, bindAddress, advertiseAddress, port.getOrElse(-1), conf, securityManager, numUsableCores, !isDriver)
+// Figure out which port RpcEnv actually bound to in case the original port is 0 or occupied.
+if (isDriver) {
+  conf.set(&quot;spark.driver.port&quot;, rpcEnv.address.port.toString)
+}
+def create(
+      name: String,
+      bindAddress: String,
+      advertiseAddress: String,
+      port: Int,
+      conf: SparkConf,
+      securityManager: SecurityManager,
+      numUsableCores: Int,
+      clientMode: Boolean): RpcEnv = {
+    val config = RpcEnvConfig(conf, name, bindAddress, advertiseAddress, port, securityManager,
+      numUsableCores, clientMode)
+    new NettyRpcEnvFactory().create(config)
+}</pre>
+
+###### RpcEnv即RPC环境，Spark各个组件之间必然会存在大量通信，这些通信实体被抽象成RPC端点和RPC引用
+
+###### RpcEnv为RPC端点提供处理消息环境，并负责向RPC端点注册、端点销毁和端点间的消息路由
+
+###### 底层是使用Netty来实现的
+
+##### SerializerManager
+> leftSide=`true`
+
+- NOTE
+<pre>val serializer = instantiateClassFromConf[Serializer](&quot;spark.serializer&quot;, &quot;org.apache.spark.serializer.JavaSerializer&quot;)
+logDebug(s&quot;Using serializer: ${serializer.getClass}&quot;)
+//数据序列化器
+val serializerManager = new SerializerManager(serializer, conf, ioEncryptionKey)
+//闭包序列化器
+val closureSerializer = new JavaSerializer(conf)</pre>
+
+###### 序列化器
+
+###### Spark在存储或交换数据时，往往需要对数据进行序列化之后再反序列化
+> leftSide=`true`
+
+
+###### 为了节省空间还会对数据进行压缩
+> leftSide=`true`
+
+
+###### 序列化类型
+
+####### org\.apache\.spark\.serializer\.JavaSerializer
+
+####### org\.apache\.spark\.serializer\.KryoSerializer
+> leftSide=`true`
+
+
+###### 序列化器
+> leftSide=`true`
+
+
+####### serializerManager
+
+######## 用于对数据序列化
+
+####### closureSerializer
+> leftSide=`true`
+
+
+######## 闭包序列化器
+
+######## 此序列化器通常用于DAGScheduler,TaskSetManager
+> leftSide=`true`
+
+
+######## 其序列化类型固定为org\.apache\.spark\.serializer\.JavaSerializer,不能修改
+> leftSide=`true`
+
+
+##### BroadcastManager
+
+###### 广播管理器
+
+###### 供用户广播数据，Spark Core内部也广泛使用
+> leftSide=`true`
+
+
+##### MapOutputTracker
+
+###### Map端输出跟踪器
+
+###### 在Shuffle过程中，Map端任务通过Shuffle Writer阶段产生中间数据
+> leftSide=`true`
+
+
+###### Reduce任务在Shuffle Read的时候需要知道哪些数据位于哪些节点上，以及Map输出的状态信息
+> leftSide=`true`
+
+
+###### MapOutputTracker负责维护以上这些信息
+> leftSide=`true`
+
+
+###### Driver端和Executor端
+
+####### Driver端
+
+######## MapOutputTrackerMaster
+
+######## 接受Executor端发来的数据
+> leftSide=`true`
+
+
+####### Executor端
+> leftSide=`true`
+
+
+######## MapOutputTrackerWorker
+
+######## 向Driver端汇报自己的情况
+> leftSide=`true`
+
+
+##### ShuffleManager
+> leftSide=`true`
+
+
+###### Shuffle管理器
+
+###### 负责Shuffle阶段的机制，并提供具体实现
+> leftSide=`true`
+
+
+###### 默认使用排序sort,即SortShuffleManager
+
+###### 主要是通过反射来构建shuffle实例
+> leftSide=`true`
+
+
+##### MemoryManager
+> leftSide=`true`
+
+
+###### 内存管理器
+
+###### 负责Spark各个节点内存的分配、利用和回收
+> leftSide=`true`
+
+
+###### 内存管理机制
+> leftSide=`true`
+
+
+####### StaticMemoryManager，静态内存管理器\(1\.6\.x之前使用\)
+
+####### UnifiedMemoryManager，统一内存管理器\(1\.6\.x之后使用，默认\)
+> leftSide=`true`
+
+
+##### BlockManager
+> leftSide=`true`
+
+
+###### 块管理器
+
+###### 块是Spark存储的基本单位
+> leftSide=`true`
+

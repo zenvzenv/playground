@@ -1770,7 +1770,7 @@ val memoryManager: MemoryManager =
     //静态内存管理器(1.6.x之前使用)
     new StaticMemoryManager(conf, numUsableCores)
   } else {
-    //同一内存管理器(1.6.x之后使用，默认)
+    //统一内存管理器(1.6.x之后使用，默认)
     UnifiedMemoryManager(conf, numUsableCores)
   }
 ```
