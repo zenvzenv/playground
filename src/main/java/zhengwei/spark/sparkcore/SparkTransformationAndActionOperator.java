@@ -35,7 +35,7 @@ public class SparkTransformationAndActionOperator {
 
 	@BeforeAll
 	static void init() {
-		conf.setAppName("SparkOperator").setMaster("local[2]");
+		conf.setAppName("SparkOperator").setMaster("local[1]");
 		jsc = new JavaSparkContext(conf);
 		rdd1 = jsc.parallelize(Arrays.asList("zhengwei", "zhangsan", "lisi", "wangwu", "maliu"));
 		rdd2 = jsc.parallelize(Arrays.asList("lisi", "wanwu", "maliu", "zhengwei1", "zhengwei2"));
@@ -149,6 +149,15 @@ public class SparkTransformationAndActionOperator {
 	@Test
 	void testAggregateByKey() {
 		JavaPairRDD<String, Integer> aggregateByKey = rdd6.aggregateByKey(2, Integer::sum, Integer::sum);
+		rdd6.aggregateByKey(0,
+				(Integer x, Integer y) -> {
+					System.out.println(x + "\t" + y);
+					return x + y;
+				},
+				(Integer x, Integer y) -> {
+					System.out.println(x + "\t" + y);
+					return x + y;
+				});
 		aggregateByKey.foreach(x -> System.out.println(x._1 + "->" + x._2));
 	}
 
@@ -220,6 +229,25 @@ public class SparkTransformationAndActionOperator {
 		//右链接，以右RDD为主，右RDD中的所有记录都会出现，如果右RDD中有而左RDD中没有的话，那么将会以Optional.empty标识
 		JavaPairRDD<String, Tuple2<Optional<Integer>, Integer>> rightOuterJoin = rdd7.rightOuterJoin(rdd8);
 		rightOuterJoin.collect().forEach(System.out::println);
+	}
+
+	@Test
+	void testSaveAsHadoopFile() {
+//		rdd6.saveAsHadoopFile("hdfs:///user/linkage/");
+		System.setProperty("HADOOP_USER_NAME", "zhengwei");
+		System.setProperty("user.name", "zhengwei");
+		SparkConf conf = new SparkConf()
+				.setAppName("HadoopTest")
+				.setMaster("yarn")
+				.set("deploy-mode", "client")
+				.set("spark.yarn.jars", "/test/spark/jars")
+				.setJars(new String[]{"C:/Users/zhengwei/Desktop/asiainfo_work/playground/target/playground-1.0-SNAPSHOT.jar"})
+				.setIfMissing("spark.driver.host", "192.168.1.104");
+		JavaSparkContext jsc = new JavaSparkContext(conf);
+		JavaRDD<String> rdd = jsc.textFile("hdfs:/test/spark/input");
+		rdd.flatMap(line -> Arrays.asList(line.split("[ ]")).iterator()).mapToPair(x -> new Tuple2<>(x, 1)).reduceByKey(Integer::sum).collectAsMap().forEach((k, v) -> {
+			System.out.println(k + "---" + v);
+		});
 	}
 
 	@AfterAll
