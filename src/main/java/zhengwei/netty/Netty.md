@@ -215,12 +215,24 @@ new DataOutpurStream(new BufferedOutputStream(new FileOutputStream()))
 ## Java中的NIO
 ### Java的IO与NIO对比
 java.io中最核心的一个概念就是流(stream)，面向流的编程，一个流要么是输入流要么就是输出流，不能既是输入流又是输出流。  
-java.nio中有三个核心的概念:selector,channel,buffer，在java.nio中是面向块(block)火是缓冲区(buffer)来编程的。
+java.nio中有三个核心的概念:selector,channel,buffer，在java.nio中是面向块(block)或是缓冲区(buffer)来编程的。
 ### buffer
-buffer本身就是一块内存，底层实现是用数组实现，数据的读写都是用buffer来实现的，一个buffer既可以读数据也可以写数据，一个程序想要从读取数据，必须先从channel中把数据读到buffer中，然后再从buffer中读取数据；那写数据同理。  
+buffer本身就是一块内存，底层实现是用数组实现，数据的读写都是用buffer来实现的，一个buffer既可以读数据也可以写数据，一个程序想要从读取数据，**必须**先从channel中把数据读到buffer中，然后再从buffer中读取数据；那写数据同理。  
 除了数组之外，buffer还提供了对于数据的结构化访问方式，并且可以追踪到系统的读写过程。  
-Java中的额8种数据类型都有对应的buffer类型，入IntBuffer,LongBuffer,ByteBuffer,CharBuffer...
+Java中的额7种数据类型都有对应的buffer类型，入IntBuffer,LongBuffer,ByteBuffer,CharBuffer...除了boolean没有buffer类型。
 ### channel
 channel指的是可以向其写入数据或从中读取数据的对象，它类似于java.io中的stream  
 所有数据的读写都是通过buffer来进行的，永远不会出现直接向channel写入数据的情况，或是直接从channel读取数据的情况  
-与stream不同的是，channel是双向的，一个stream只能是InputStream或是OutputStream；hannel打开之后可以读写操作，由于channel是双向的，因此更能反映出底层操作系统的真实情况，在Linux系统中，底层操作系统的通道就是双向的
+与stream不同的是，channel是双向的，一个stream只能是InputStream或是OutputStream；channel打开之后可以读写操作，由于channel是双向的，因此更能反映出底层操作系统的真实情况，在Linux系统中，底层操作系统的通道就是双向的
+### 三个状态属性
+#### capacity
+A buffer's capacity is the number of elements it contains. Thecapacity of a buffer is never negative and never changes.  
+一个buffer的capacity是这个buffer的最大容量，且capacity永远不会小于0，且不会改变
+#### limit
+A buffer's limit is the index of the first element that should not be read or written. A buffer's limit is never negative and is never greater than its capacity.
+一个buffer的limit是将要读或写的元素的下一个位置的索引，limit永远不可能为负数和永远不糊大于capacity。  
+比如上一次写入buffer的最后一个元素是5，那么它的下一个索引位就是6，所以limit就是指向6这个位置。
+#### position
+A buffer's position is the index of the next element to be read or written.  A buffer's position is never negative and is never greater than its limit.
+一个buffer的position指的是下一个将要读或写的索引位置。position不可能为负数，并且不会大于limit
+比如现在buffer中的最后一个元素的索引是5，那么如果还有数据需要读的话，那么接下来的元素索引就是6，那么position所指向的索引位置就是6.
