@@ -1295,8 +1295,24 @@ val closureSerializer = new JavaSerializer(conf)</pre>
 > leftSide=`true`
 
 
-###### 块管理器
+###### 块管理器，负责块的存储、读写流程和状态信息
 
 ###### 块是Spark存储的基本单位
+> leftSide=`true`
+
+
+###### 在初始化BlockManager之前，还需要初始化块传输服务BlockTransportService，以及BlockManagerMaster
+> leftSide=`true`
+
+
+###### 采用主从结构，Driver上的是主RPC端点BlockManagerMasterEndpoint，Executor上的是从RPC端点BlockManagerSlaveEndpoint
+> leftSide=`true`
+
+
+###### Spark中的块与hdfs和操作系统中的块不太一样，Spark中的块可以存储在堆内存、堆外内存和外存\(磁盘\)
+> leftSide=`true`
+
+
+##### MetricsSystem
 > leftSide=`true`
 
