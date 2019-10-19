@@ -24,7 +24,7 @@ public class UnsafeTest {
         System.out.println(unsafe1);
     }
 
-    private static Unsafe getUnsafe() {
+    static Unsafe getUnsafe() {
         try {
             Field theUnsafe = Unsafe.class.getDeclaredField("theUnsafe");
             //设置可以访问私有属性
