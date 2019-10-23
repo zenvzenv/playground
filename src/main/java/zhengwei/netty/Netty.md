@@ -230,9 +230,18 @@ A buffer's capacity is the number of elements it contains. Thecapacity of a buff
 一个buffer的capacity是这个buffer的最大容量，且capacity永远不会小于0，且不会改变
 #### limit
 A buffer's limit is the index of the first element that should not be read or written. A buffer's limit is never negative and is never greater than its capacity.
-一个buffer的limit是将要读或写的元素的下一个位置的索引，limit永远不可能为负数和永远不糊大于capacity。  
+一个buffer中，要读或要写的最后一个元素的下一个元素的索引，limit永远不可能为负数和永远不糊大于capacity。  
 比如上一次写入buffer的最后一个元素是5，那么它的下一个索引位就是6，所以limit就是指向6这个位置。
 #### position
 A buffer's position is the index of the next element to be read or written.  A buffer's position is never negative and is never greater than its limit.
 一个buffer的position指的是下一个将要读或写的索引位置。position不可能为负数，并且不会大于limit
 比如现在buffer中的最后一个元素的索引是5，那么如果还有数据需要读的话，那么接下来的元素索引就是6，那么position所指向的索引位置就是6.
+### 从nio中读取文件的步骤
+1. 从FileInputStream中获取FileChannel对象
+2. 创建Buffer
+3. 将数据冲Channel中读入到Buffer中
+### 绝对方法与相对方法
+#### 相对方法
+limit与position的值会在操作时被考虑到，程序会去检查其值是否符合相应规范
+#### 绝对方法
+完全忽略limit与position，直接根据Buffer的索引去获取数据
