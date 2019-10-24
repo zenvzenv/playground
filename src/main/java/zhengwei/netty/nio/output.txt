@@ -1,0 +1,7 @@
+hello
+world
+zhengwei
+spark
+hadoop
+hive
+hbase
