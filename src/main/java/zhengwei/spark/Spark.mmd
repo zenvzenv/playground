@@ -1002,7 +1002,7 @@ private val nextRddId = new AtomicInteger(0)</pre>
 ###### 如果没有相同的队列名的话，则会新建一个AsynvEventQueue，然后把监听器注册到队列中
 
 ## SparkEnv
-> leftSide=`true`
+> collapsed=`true`,leftSide=`true`
 
 
 ### SparkContext在初始化事件总线\(ListenerBus\)之后，就会去初始化SaprkEnv
@@ -1012,7 +1012,7 @@ private val nextRddId = new AtomicInteger(0)</pre>
 
 
 ### Driver环境的创建
-> leftSide=`true`
+> collapsed=`true`,leftSide=`true`
 
 
 #### Dirver环境的创建是通过org\.apache\.spark\.SparkEnv\.createDriverEnv
@@ -1051,7 +1051,7 @@ private val nextRddId = new AtomicInteger(0)</pre>
 }</pre>
 
 ### Executor环境创建
-> leftSide=`true`
+> collapsed=`true`,leftSide=`true`
 
 
 #### Executor环境的创建是通过org\.apache\.spark\.SparkEnv\.createExecutorEnv
@@ -1078,14 +1078,18 @@ private val nextRddId = new AtomicInteger(0)</pre>
 }</pre>
 
 ### 初始化
-> leftSide=`true`
+> collapsed=`true`,leftSide=`true`
 
 
 #### SecurityManager
 
 ### 重要方法
+> collapsed=`true`
+
 
 #### create\(\)
+> collapsed=`true`
+
 - NOTE
 <pre>private def create(
     conf: SparkConf,
@@ -1109,6 +1113,8 @@ private val nextRddId = new AtomicInteger(0)</pre>
 ##### 按初始化顺序依次介绍
 
 ##### SecurityManager
+> collapsed=`true`
+
 - NOTE
 <pre>val securityManager = new SecurityManager(conf, ioEncryptionKey)
 if (isDriver) {
@@ -1131,7 +1137,7 @@ ioEncryptionKey.foreach { _ =&gt;
 ###### 基于ACL\(Access Control List,访问控制列表\),来管理Spark内部账号和权限
 
 ##### RpcEnv
-> leftSide=`true`
+> collapsed=`true`,leftSide=`true`
 
 - NOTE
 <pre>val systemName = if (isDriver) driverSystemName else executorSystemName
@@ -1161,7 +1167,7 @@ def create(
 ###### 底层是使用Netty来实现的
 
 ##### SerializerManager
-> leftSide=`true`
+> collapsed=`true`,leftSide=`true`
 
 - NOTE
 <pre>val serializer = instantiateClassFromConf[Serializer](&quot;spark.serializer&quot;, &quot;org.apache.spark.serializer.JavaSerializer&quot;)
@@ -1182,6 +1188,8 @@ val closureSerializer = new JavaSerializer(conf)</pre>
 
 
 ###### 序列化类型
+> collapsed=`true`
+
 
 ####### org\.apache\.spark\.serializer\.JavaSerializer
 
@@ -1190,15 +1198,17 @@ val closureSerializer = new JavaSerializer(conf)</pre>
 
 
 ###### 序列化器
-> leftSide=`true`
+> collapsed=`true`,leftSide=`true`
 
 
 ####### serializerManager
+> collapsed=`true`
+
 
 ######## 用于对数据序列化
 
 ####### closureSerializer
-> leftSide=`true`
+> collapsed=`true`,leftSide=`true`
 
 
 ######## 闭包序列化器
@@ -1212,6 +1222,8 @@ val closureSerializer = new JavaSerializer(conf)</pre>
 
 
 ##### BroadcastManager
+> collapsed=`true`
+
 
 ###### 广播管理器
 
@@ -1220,6 +1232,8 @@ val closureSerializer = new JavaSerializer(conf)</pre>
 
 
 ##### MapOutputTracker
+> collapsed=`true`
+
 
 ###### Map端输出跟踪器
 
@@ -1236,8 +1250,12 @@ val closureSerializer = new JavaSerializer(conf)</pre>
 
 
 ###### Driver端和Executor端
+> collapsed=`true`
+
 
 ####### Driver端
+> collapsed=`true`
+
 
 ######## MapOutputTrackerMaster
 
@@ -1246,7 +1264,7 @@ val closureSerializer = new JavaSerializer(conf)</pre>
 
 
 ####### Executor端
-> leftSide=`true`
+> collapsed=`true`,leftSide=`true`
 
 
 ######## MapOutputTrackerWorker
@@ -1256,7 +1274,7 @@ val closureSerializer = new JavaSerializer(conf)</pre>
 
 
 ##### ShuffleManager
-> leftSide=`true`
+> collapsed=`true`,leftSide=`true`
 
 
 ###### Shuffle管理器
@@ -1272,7 +1290,7 @@ val closureSerializer = new JavaSerializer(conf)</pre>
 
 
 ##### MemoryManager
-> leftSide=`true`
+> collapsed=`true`,leftSide=`true`
 
 
 ###### 内存管理器
@@ -1282,7 +1300,7 @@ val closureSerializer = new JavaSerializer(conf)</pre>
 
 
 ###### 内存管理机制
-> leftSide=`true`
+> collapsed=`true`,leftSide=`true`
 
 
 ####### StaticMemoryManager，静态内存管理器\(1\.6\.x之前使用\)
@@ -1292,7 +1310,7 @@ val closureSerializer = new JavaSerializer(conf)</pre>
 
 
 ##### BlockManager
-> leftSide=`true`
+> collapsed=`true`,leftSide=`true`
 
 
 ###### 块管理器，负责块的存储、读写流程和状态信息
@@ -1316,3 +1334,39 @@ val closureSerializer = new JavaSerializer(conf)</pre>
 ##### MetricsSystem
 > leftSide=`true`
 
+
+## Rpc
+
+### 在早期版本，Spark采用Akka来解决节点间的通讯问题，在2\.x\.x版本改为Netty
+
+### 基本架构
+
+#### TransportContext
+
+##### TransportConf
+> topicLinkUID=`16E64113915A`
+
+
+###### 传输上下文配置信息
+
+##### RpcHandler
+
+###### 客户端请求消息进行处理的处理器
+
+##### 通过createClientFactory来创建TransportClientFactory\(必须要TransportConf\)
+- TOPIC
+<pre>16E64113915A</pre>
+
+###### RPC客户端工厂类
+
+###### ClientPool
+
+####### TransportClient
+
+###### TransportClientBootstrap
+
+##### TransportServer\(必须要TransportConf,RpcHandler\)
+- TOPIC
+<pre>16E64113915A</pre>
+
+###### RpcHandler
