@@ -560,3 +560,9 @@ thread      T1          T2
                 * 在Java程序中，倘若在本线程中，所有操作都视为有序行为，如果是多线程环境下，一个线程中观察另一个线程，所有操作都是无序的，前半句指的是单线程内保证串行语义的一致性，后半句指的是治理重排序现象和工作内存与主内存同步延迟现象。
             5. JMM提供的解决方案
                 * 在Java内存模型中都提供一套解决方案供Java工程师在开发过程使用，如原子性问题，除了JVM自身提供的对基本数据类型读写操作的原子性外，对于方法级别或者代码块级别的原子性操作，可以使用synchronized关键字或者重入锁(ReentrantLock)保证程序执行的原子性，工作内存与主内存同步延迟现象导致的可见性问题，可以使用synchronized关键字或者volatile关键字解决，它们都可以使一个线程修改后的变量立即对其他线程可见。对于指令重排导致的可见性问题和有序性问题，则可以利用volatile关键字解决，因为volatile的另外一个作用就是禁止重排序优化，关于volatile稍后会进一步分析。除了靠sychronized和volatile关键字来保证原子性、可见性以及有序性外，JMM内部还定义一套happens-before 原则来保证多线程环境下两个操作间的原子性、可见性以及有序性。
+    3. Atomic原子类中Unsafe底层汇编代码用到的指令
+        1. cmpxchg->compareAndSwapLong
+        2. cmpxchg1->compareAndSwapInt
+        3. xchg1->putOrderedInt
+        4. cmpxchgq->compareAndSwapObject
+        5. lock1->voliatile
