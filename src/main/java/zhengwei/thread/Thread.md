@@ -566,3 +566,37 @@ thread      T1          T2
         3. xchg1->putOrderedInt
         4. cmpxchgq->compareAndSwapObject
         5. lock1->voliatile
+## AQS(AbstractQueuedSynchronizer)
+抽象的队列式同步器，是所有的无锁同步容器的集成。许多同步类都是基于AQS实现的(例如：CountDownLatch,Exchanger,semaphore...)
+### 框架
+AQS中维护了一个 `volatile int state` (代表共享变量)和一个FIFO线程等待队列(多线程争用资源被阻塞时会进入此队列)。这里 `volatile` 是核心关键字。  
+针对state的访问方式有三种：
+* getState()
+* setState(int newState)
+* compareAndSetState(int expect, int update)
+AQS中有如下两种资源共享方式：  
+1. Exclusive(独占)  
+独占模式一次只允许有一个线程能够去执行公共资源，例如：ReentrantLock  
+2. Share(共享)  
+共享模式一次允许多个线程同时执行公共资源，例如：Semaphore,CountDownLatch...  
+不同的自定义同步器争用共享资源的方式是不同的，**自定义同步容器在实现时只需要实现共享变量state的获取与释放即可**，至于具体线程等待队列的维护(如获取资源失败入队/唤醒出队等)，AQS都已经在顶层实现好了，自定义同步器实现时需要实现如下几个方法：  
+* isHeldExclusive()：该线程是否正在独占资源。只有用到condition时需要实现
+* tryAcquire(int)：独占方式。尝试获取资源，成功返回true，失败返回false
+* tryRelease(int)：独占方式。尝试释放资源，成功返回true，失败返回false
+* tryAcquireShared(int)：共享方式。尝试获取资源。负数表示失败；0表示成功但是没有剩余可用资源；正数表示成功且有剩余可用资源
+* tryReleaseShared(int)：共享方式。尝试释放资源。如果释放后允许唤醒后续等待线程返回true，否则返回false
+>以ReentrantLock为例，state初始值为0，表示未锁定状态。当线程A调用lock()时，会调用tryAcquire()独占该锁并将state+=1，此后，所有其他线程再tryAcquire()时就会失败，知道线程A调用unlock()使得state=0即释放锁为止，其他线程才能再次获取该锁。  
+>当然，在线程A在释放该锁之前，A线程自己可以重复的获取此锁(state会累加，每重入一次加一)，这就是可重入的概念。但是要注意，重入了多少次就要释放多少次，以确保state回到0.  
+>再以CountDownLatch为例，任务被分为N个线程去执行，state也被初始化为N(CountDownLatch中的门闩的数量要与线程的数量一致)。这N个子线程同时执行，每当一个子线程执行完毕之后countdown()一次，state就会CAS减一，等到所有线程都执行完毕之后(即state=0)，  
+>会unpark()主调线程，然后主调线程会从await()返回，继续后续操作。  
+
+一般来说，自定义同步器要么是独占方式，要么时共享方式，他们也只需实现tryAcquire-tryRelease或者tryAcquireShared-tryReleaseShared中的一种
+### 源码解析
+#### 节点状态-waitStatus
+* CANCELLED(1):表示当前节点已经取消调度。当timeout或被中断(响应终端的情况下)，或触发变更此状态，进入该状态后的节点将不会变化
+* SIGNAL(-1):表示后继节点在等待当前节点唤醒。后继节点入队时会将前驱节点的状态更新为signal
+* CONDITION(-2):表示该节点等待在condition上，当其他线程调用了Condition的signal()方法后，CONDITION状态的结点将从等待队列转移到同步队列中，等待获取同步锁。
+* PROPAGATE(-3)：共享模式下，前继结点不仅会唤醒其后继结点，同时也可能会唤醒后继的后继结点。
+* 0：新结点入队时的默认状态。
+**注意，负值表示结点处于有效等待状态，而正值表示结点已被取消。所以源码中很多地方用>0、<0来判断结点的状态是否正常。**
+#### acquire(int)
