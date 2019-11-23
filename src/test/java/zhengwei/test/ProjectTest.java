@@ -2,11 +2,10 @@ package zhengwei.test;
 
 import com.csvreader.CsvWriter;
 import org.junit.jupiter.api.Test;
-import zhengwei.common.IpUtil;
-import zhengwei.common.SysUtils;
+import zhengwei.util.common.IpUtil;
+import zhengwei.util.common.SysUtils;
 
 import java.io.*;
-import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -21,9 +20,24 @@ import java.util.stream.Collectors;
 public class ProjectTest {
     @Test
     void getStartAndDestIp() {
-        System.out.println(IpUtil.getNetMask("25"));
-        System.out.println(IpUtil.getStartAddr("101.226.246.0", "255.255.255.128"));
-        System.out.println(IpUtil.getEndAddr("101.226.246.0", "255.255.255.128"));
+        String netMask = IpUtil.getNetMask("11");
+        System.out.println(netMask);
+        System.out.println(IpUtil.getStartAddr("47.96.0.0", netMask));
+        System.out.println(IpUtil.ipToLong(IpUtil.getStartAddr("47.96.0.0", netMask)));
+        System.out.println(IpUtil.getEndAddr("47.96.0.0", netMask));
+        System.out.println(IpUtil.ipToLong(IpUtil.getEndAddr("47.96.0.0", netMask)));
+    }
+
+    @Test
+    void testIp() {
+        /*System.out.println(IpUtil.ipToLong("182.254.130.119"));
+        System.out.println(IpUtil.ipToLong("182.254.130.231"));
+        System.out.println(IpUtil.ipToLong("182.254.135.15"));
+        System.out.println(IpUtil.ipToLong("139.224.95.49"));*/
+        System.out.println(IpUtil.ipLongToString(1850486785L));
+
+        System.out.println(IpUtil.ipLongToString(1850408961L));
+        System.out.println(IpUtil.ipLongToString(1850474494L));
     }
 
     @Test
@@ -96,8 +110,9 @@ public class ProjectTest {
             e.printStackTrace();
         }
     }
+
     @Test
-    void formatIpToClient(){
+    void formatIpToClient() {
         try (InputStream is = new FileInputStream("I:/temp/ip对应客户.csv");
              InputStreamReader isr = new InputStreamReader(is, StandardCharsets.UTF_8);
              BufferedReader br = new BufferedReader(isr)) {
@@ -111,17 +126,23 @@ public class ProjectTest {
                 String[] ipAndMask = fields[0].split("[/]");
                 String ip = ipAndMask[0].trim();
                 for (int i = 1; i < ipAndMask.length; i++) {
-                    String[] content=new String[3];
+                    String[] content = new String[3];
                     String netMask = IpUtil.getNetMask(ipAndMask[i].trim());
                     String startIp = String.valueOf(IpUtil.getStartAddr(ip, netMask));
                     String endIp = String.valueOf(IpUtil.getEndAddr(ip, netMask));
-                    content[0]=startIp;
-                    content[1]=endIp;
-                    content[2]=name;
+                    content[0] = startIp;
+                    content[1] = endIp;
+                    content[2] = name;
                 }
             }
         } catch (IOException e) {
             e.printStackTrace();
         }
+    }
+
+    @Test
+    void testTemp() {
+//        System.out.println(Long.parseLong("1078.00000000000000000000"));
+        System.out.println(Double.parseDouble("1078.00000000000000000000")*8);
     }
 }

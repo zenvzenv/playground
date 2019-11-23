@@ -28,3 +28,54 @@ du -h --max-depth=1
 tar czvf FileName.tar DirName
 #tar解压
 tar zxvf FileName.tar
+hdfs dfs -cat /user/asiainfo/idc/data/source/netflow/2019/10/22/13/50/netflowv5.201910221350.source-file-node-2_025|awk -F'|' '{gsub(/[[:blank:]]*/,"",$5)}'|head -10
+hcat /user/asiainfo/idc/rca/process/r2r/trace/2019/10/29/part-00000| \
+awk -F':' '{print $2}' |\
+awk -F'|' '{
+	for(i=1;i<=NF;i++){
+		print $i
+	}
+}' |\
+grep -v '*' | awk -F '\^' \
+'
+BEGIN{
+	name=0; port=0; total=0
+}
+{
+	total+=1;
+	if($1==$2) port+=1;
+	else name+=1;
+}
+END{
+	print "backfill rate="name/total
+}
+'
+
+hcat /user/asiainfo/idc/rca/process/r2r/trace/2019/10/29/part-00000| \
+awk -F':' '{print $2}' |\
+awk -F'|' '{
+	for(i=1;i<=NF;i++){
+		print $i
+	}
+}' |\
+grep -v '*' | awk -F '\^' \
+'
+{if($1==$2) print $2}
+' |\
+sort -u > ~/zhengwei/tracepreprocess/data/port.txt
+
+#输出一条记录中按特定字符分割的所有字段
+hcat /user/asiainfo/idc/rca/process/r2r/trace/2019/10/29/part-00000| \
+awk -F':' '{print $2}' |\
+awk -F'|' '{
+	for(i=1;i<=NF;i++){
+		print $i
+	}
+}' |\
+grep -v '*' | awk -F '\^' \
+'
+{if($1!=$2) print $2}
+' |\
+sort -u > ~/zhengwei/tracepreprocess/data/name.txt
+
+hcat hdfs://cmhcluster/user/bdoc/10/services/hdfs/37/hive/it_lac_sign_15m/2019/11/04/00/*|awk -F'\1' '{if($3!=0 && $4!=0) lacci[$3"_"$4]+=1} END{for(i in lacci) {if(lacci[i]>4) printf "lacci->%s,count->%d\n",i,lacci[i]}}'

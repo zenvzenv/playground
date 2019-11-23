@@ -8,7 +8,7 @@ import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
 import org.junit.jupiter.api.Test;
 import scala.Tuple2;
-import zhengwei.common.SparkUtils;
+import zhengwei.util.common.SparkUtils;
 
 import java.util.Iterator;
 import java.util.Map;
