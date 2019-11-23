@@ -2,7 +2,7 @@ package zhengwei.bootstrap;
 
 import com.csvreader.CsvWriter;
 import org.junit.jupiter.api.Test;
-import zhengwei.common.SysUtils;
+import zhengwei.util.common.SysUtils;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;

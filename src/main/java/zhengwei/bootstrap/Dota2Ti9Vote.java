@@ -1,9 +1,8 @@
 package zhengwei.bootstrap;
 
-import org.jsoup.Connection;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
-import zhengwei.common.HttpAPIClient;
+import zhengwei.util.common.HttpAPIClient;
 
 import java.io.IOException;
 
