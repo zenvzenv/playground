@@ -305,8 +305,9 @@ public interface TransportClientBootstrap {
 TransportClientBootstrap接口有两个实现类，AuthClientBootstrap和SaslClientBootstrap.
 ##### 2.2.8.2 创建RPC客户端-TransportClient
 有了TransportClientFactory之后。Spark的各个组件就可以使用它来创建用于通讯的TransportClient了。每个TransportClient只能和一个远端的RPC服务通讯，所以Spark中的组件如果想要和多个RPC服务通讯，就需要只有多个TransportClient实例。
-创建TransportClient的方法代码如下(实际是从缓存中获取TransportClient)：
+创建TransportClient的方法代码如下(**实际是从缓存中获取TransportClient**)：
 ```java
+//org.apache.spark.network.client.TransportClientFactory.createClient(java.lang.String, int)
 public TransportClient createClient(String remoteHost, int remotePort)
     throws IOException, InterruptedException {
   // Get connection from the connection pool first.
@@ -369,6 +370,12 @@ public TransportClient createClient(String remoteHost, int remotePort)
   }
 }
 ```
+1. 调用InetSocket的静态方法createUnresolved构建InetSocketAddress(这种方式创建创建InetSocketAddress，可以在缓存中已经有TransportClient时避免不必要的域名解析)，然后从connectionPool中获取与此地址对于的clientPool，如果没有，则需要新建ClientPool，并放入缓存connectionPool中。
+2. 获取"spark.模块名.io.numConnectionsPerPeer" 的属性值，从ClientPool数组中随机获取一个TransportClient
+3. 如果ClientPool的clients数组中在随机产生的索引处的TransportClient不存在或者没有激活，则进入第5步，否则对TransportClient进行第4步检查
+4. 更新TransportClient的channel中配置的TransportChannelHandler的最后一次使用时间，确保channel没有超时，然后检查TransportClient是否时激活状态，最后返回TransportClient给调用这
+5. 由于随机选取到的TransportClient不可用，直接实例化一个InetSocketAddress(调用构造器去实例化InetSocketAddress会进行域名解析)，在这一步多个线程会产生竞争(由于没有做同步处理，所以极有可能多个线程同时执行到这，都发现没有TransportClient可用，于是都使用InetSocketAddress构造器去构造实例)
+6. 由于第5步创建InetSocketAddress的过程中产生的竞态条件如果处理不妥当，会产生线程安全问题，那么ClientPool中的locks就发挥作用了。按照随机产生的数组索引，locks中的对象可以对cliens中的TransportClient进行一对一的加锁。即便之前产生了竞态条件，但到这一步时只会有一个进行临界区。在临界区中，先进入的线程调用重载的createClient创建TransportClient对象并放入到clients数组中。之后再进入临界区的线程会发现此时索引处已有Transport对象，则不会再去创建而是直接去使用
 
 #### 2.2.9 ClientPool
 在两个对等节点间维护的关于TransportClient的池子。ClientPool时TransportClientFactory的内部组件
