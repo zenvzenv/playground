@@ -28,6 +28,8 @@ class ExchangerDemo1 {
         new Thread(() -> {
             try {
                 System.out.printf("%s start.\n", Thread.currentThread().getName());
+                //交换数据的线程会阻塞
+                TimeUnit.SECONDS.sleep(10);
                 String message = exchanger.exchange("The message from T1");
                 System.out.printf("The message content -> [ %s ]\n", message);
                 System.out.printf("%s end\n", Thread.currentThread().getName());
