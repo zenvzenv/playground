@@ -12,30 +12,41 @@ import java.util.concurrent.atomic.AtomicIntegerArray;
  * @since 2019/9/23 20:07
  */
 public class AtomicArrayTest {
-	private static AtomicIntegerArray integerArray;
+    private static AtomicIntegerArray integerArray;
 
-	@BeforeAll
-	static void testInitAtomicArray() {
-		integerArray = new AtomicIntegerArray(10);
-		System.out.println(integerArray.length());
-	}
+    @BeforeAll
+    static void testInitAtomicArray() {
+        integerArray = new AtomicIntegerArray(10);
+        System.out.println(integerArray.length());
+    }
 
-	@Test
-	void testGet() {
-		System.out.println(integerArray.get(5));
-	}
+    @Test
+    void testGet() {
+        System.out.println(integerArray.get(5));
+    }
 
-	@Test
-	void testSet() {
-		for (int i = 0; i < integerArray.length(); i++) {
-			integerArray.set(i, i);
-		}
-		for (int i = 0; i < integerArray.length(); i++) {
-			System.out.println(integerArray.get(i));
-		}
-	}
-	@Test
-	void testGetAndSet(){
+    @Test
+    void testSet() {
+        for (int i = 0; i < integerArray.length(); i++) {
+            integerArray.set(i, i);
+        }
+        for (int i = 0; i < integerArray.length(); i++) {
+            System.out.println(integerArray.get(i));
+        }
+    }
 
-	}
+    @Test
+    void testGetAndSet() {
+        for (int i = 0; i < integerArray.length(); i++) {
+            System.out.println(integerArray.get(i));
+        }
+		System.out.println("-------");
+        for (int i = 0; i < integerArray.length(); i++) {
+            integerArray.getAndSet(i, i + 1);
+        }
+		System.out.println("-------");
+        for (int i = 0; i < integerArray.length(); i++) {
+            System.out.println(integerArray.get(i));
+        }
+    }
 }
