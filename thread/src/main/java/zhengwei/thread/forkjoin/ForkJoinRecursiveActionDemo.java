@@ -17,9 +17,7 @@ public class ForkJoinRecursiveActionDemo {
 
     public static void main(String[] args) throws InterruptedException {
         final ForkJoinPool forkJoinPool = new ForkJoinPool();
-        forkJoinPool.submit(()->{
-            System.out.println("-------------");
-        },new CalculateRecursiveAction(0, 10));
+        forkJoinPool.submit(new CalculateRecursiveAction(0, 10));
         forkJoinPool.awaitTermination(10, TimeUnit.SECONDS);
         Optional.of(SUM).ifPresent(System.out::println);
     }
