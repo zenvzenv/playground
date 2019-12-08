@@ -158,7 +158,54 @@ public TransportServer createServer(String host, int port, List<TransportServerB
 需要传递TransportContext、host、port、RpcHandler以及服务端引导程序TransportServerBootstrap列表。
 ### 2.2 RPC包含的组件
 #### 2.2.1 TransportContext
-传输上下文，包含了用于创建传输服务端(TransportServer)和传输客户端工厂(TransportClientFactory)的上下文信息。并支持使用TransportChannelHandler设置Netty提供的SocketChannel的Pipline实现。
+传输上下文，包含了用于创建传输服务端(TransportServer)和传输客户端工厂(TransportClientFactory)的上下文信息。并支持使用TransportChannelHandler设置Netty提供的SocketChannel的Pipeline实现。
+管道初始化，在 `org.apache.spark.network.client.TransportClientFactory.createClient(java.net.InetSocketAddress)` 和 `org.apache.spark.network.server.TransportServer.init` 中都调用了TransportContext的initializePipeline方法，主要是调用Netty的API对管道进行初始化，其代码如下：
+```java
+/*
+ * Initializes a client or server Netty Channel Pipeline which encodes/decodes messages and
+ * has a {@link org.apache.spark.network.server.TransportChannelHandler} to handle request or
+ * response messages.
+ *
+ * @param channel The channel to initialize.
+ * @param channelRpcHandler The RPC handler to use for the channel.
+ *
+ * @return Returns the created TransportChannelHandler, which includes a TransportClient that can
+ * be used to communicate on this channel. The TransportClient is directly associated with a
+ * ChannelHandler to ensure all users of the same channel get the same TransportClient object.
+ */
+public TransportChannelHandler initializePipeline(
+    SocketChannel channel,
+    RpcHandler channelRpcHandler) {
+  try {
+    TransportChannelHandler channelHandler = createChannelHandler(channel, channelRpcHandler);
+    channel.pipeline()
+      .addLast("encoder", ENCODER)
+      .addLast(TransportFrameDecoder.HANDLER_NAME, NettyUtils.createFrameDecoder())
+      .addLast("decoder", DECODER)
+      .addLast("idleStateHandler", new IdleStateHandler(0, 0, conf.connectionTimeoutMs() / 1000))
+      // NOTE: Chunks are currently guaranteed to be returned in the order of request, but this
+      // would require more logic to guarantee if this were not part of the same event loop.
+      .addLast("handler", channelHandler);
+    return channelHandler;
+  } catch (RuntimeException e) {
+    logger.error("Error while initializing Netty pipeline", e);
+    throw e;
+  }
+}
+private TransportChannelHandler createChannelHandler(Channel channel, RpcHandler rpcHandler) {
+  TransportResponseHandler responseHandler = new TransportResponseHandler(channel);
+  //真正的去创建TransportClient
+  //TransportClient和RpcHandler并没有关系，TransportClient只与TransportChannelHandler存在直接关系
+  TransportClient client = new TransportClient(channel, responseHandler);
+  TransportRequestHandler requestHandler = new TransportRequestHandler(channel, client, rpcHandler, conf.maxChunksBeingTransferred());
+  //TransportChannelHandler在服务端将代理TransportRequestHandler对请求进行处理，并在客户端代理TransportResponseHandler对响应消息进行处理
+  return new TransportChannelHandler(client, responseHandler, requestHandler, conf.connectionTimeoutMs(), closeIdleConnections);
+}
+```
+initializePipeline的执行过程如下：
+1. 调用createChannelHandler方法创建TransportChannelHandler，从createChannelHandler的代码中可以看出，TransportChannelHandler中包含一个TransportClient，这个TransportClient直接与ChannelHandler关联是用来确保同一通道的所有用户获得相同的TransportClient对象。
+2. 对管道进行设置，这里的 `ENCODER(MessageEncoder)` 派生自Netty的ChannelOutboundHandler接口， `DECODER(MessageDecoder)` 、TransportChannelHandler以及TransportFrameDecoder(由NettyUtils的NettyUtils.createFrameDecoder()创建)派生自Netty的ChannelInboundHandler接口；IdleStateHandler同时实现了ChannelOutboundHandler和ChannelInboundHandler
+根据Netty的API行为，通过addLast方法注册多个Handler的时候ChannelInboundHandler按照注册的先后顺序执行，ChannelOutboundHandler按照注册的先后顺序逆序执行。
 #### 2.2.2 TransConf
 传输上下文配置信息，即RPC配置
 ```java
@@ -237,12 +284,11 @@ object SparkTransportConf {
 ```
 从SparkTransportConf#fromSparkConf这个方法可以直到，创建TransportConf是从SparkConf中得到的。  
 主要传递三个参数，Spark的配置信息SparkConf、module模块名和内核数numUsableCores。如果numUsableCores的数量小于0，那么就取当先可用的线程数量，用于网络传输的最大线程数量最大就为8个，最终确定了线程数量之后就回去设置，客户端传输线程数(spark.$module.io.clientThreads)和服务端传输线程数(spark.$module.io.serverThreads).  
-
 #### 2.2.3 RpcHandler
 对调用传输客户端(TransportClient)的sendRPC方法发送的消息进行处理的程序
 #### 2.2.4 MessageEncoder
 消息编码器，将消息放入pipline之前需要先对消息内容进行编码，防止管道另一端读取时丢包或解析错误
-#### 2.2.5 MEssageDecoder
+#### 2.2.5 MessageDecoder
 消息解码器，对从管道中读取的ByteBuf进行解析，防止丢包或解析错误
 #### 2.2.6 TransportFrameDecoder
 对管道中读取到的ByteBuf按照数据帧进行解析
@@ -376,7 +422,85 @@ public TransportClient createClient(String remoteHost, int remotePort)
 4. 更新TransportClient的channel中配置的TransportChannelHandler的最后一次使用时间，确保channel没有超时，然后检查TransportClient是否时激活状态，最后返回TransportClient给调用这
 5. 由于随机选取到的TransportClient不可用，直接实例化一个InetSocketAddress(调用构造器去实例化InetSocketAddress会进行域名解析)，在这一步多个线程会产生竞争(由于没有做同步处理，所以极有可能多个线程同时执行到这，都发现没有TransportClient可用，于是都使用InetSocketAddress构造器去构造实例)
 6. 由于第5步创建InetSocketAddress的过程中产生的竞态条件如果处理不妥当，会产生线程安全问题，那么ClientPool中的locks就发挥作用了。按照随机产生的数组索引，locks中的对象可以对cliens中的TransportClient进行一对一的加锁。即便之前产生了竞态条件，但到这一步时只会有一个进行临界区。在临界区中，先进入的线程调用重载的createClient创建TransportClient对象并放入到clients数组中。之后再进入临界区的线程会发现此时索引处已有Transport对象，则不会再去创建而是直接去使用
+那么TransportClientFactory是怎么创建TransportClient的呢？在获取TransportClientFactory中有几个createClient重载方法，而真正去创建TransportClient的重载方法是 `org.apache.spark.network.client.TransportClientFactory.createClient(java.net.InetSocketAddress)` 方法，其具体实现如下：
+```java
+  /* Create a completely new {@link TransportClient} to the remote address. */
+  private TransportClient createClient(InetSocketAddress address)
+      throws IOException, InterruptedException {
+    logger.debug("Creating new connection to {}", address);
+    //客户端引导程序，并对引导程序进行设置
+    Bootstrap bootstrap = new Bootstrap();
+    bootstrap.group(workerGroup)
+      .channel(socketChannelClass)
+      // Disable Nagle's Algorithm since we don't want packets to wait
+      .option(ChannelOption.TCP_NODELAY, true)
+      .option(ChannelOption.SO_KEEPALIVE, true)
+      .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, conf.connectionTimeoutMs())
+      .option(ChannelOption.ALLOCATOR, pooledAllocator);
 
+    if (conf.receiveBuf() > 0) {
+      bootstrap.option(ChannelOption.SO_RCVBUF, conf.receiveBuf());
+    }
+
+    if (conf.sendBuf() > 0) {
+      bootstrap.option(ChannelOption.SO_SNDBUF, conf.sendBuf());
+    }
+
+    final AtomicReference<TransportClient> clientRef = new AtomicReference<>();
+    final AtomicReference<Channel> channelRef = new AtomicReference<>();
+    //为根引导程序设置管道初始化回调函数
+    bootstrap.handler(new ChannelInitializer<SocketChannel>() {
+      @Override
+      public void initChannel(SocketChannel ch) {
+        TransportChannelHandler clientHandler = context.initializePipeline(ch);
+        clientRef.set(clientHandler.getClient());
+        channelRef.set(ch);
+      }
+    });
+
+    // Connect to the remote server
+    long preConnect = System.nanoTime();
+    //连接远程服务器
+    ChannelFuture cf = bootstrap.connect(address);
+    if (!cf.await(conf.connectionTimeoutMs())) {
+      throw new IOException(
+        String.format("Connecting to %s timed out (%s ms)", address, conf.connectionTimeoutMs()));
+    } else if (cf.cause() != null) {
+      throw new IOException(String.format("Failed to connect to %s", address), cf.cause());
+    }
+
+    TransportClient client = clientRef.get();
+    Channel channel = channelRef.get();
+    assert client != null : "Channel future completed successfully with null client";
+
+    // Execute any client bootstraps synchronously before marking the Client as successful.
+    long preBootstrap = System.nanoTime();
+    logger.debug("Connection to {} successful, running bootstraps...", address);
+    try {
+      for (TransportClientBootstrap clientBootstrap : clientBootstraps) {
+        //给TransportClient设置客户端引导程序
+        clientBootstrap.doBootstrap(client, channel);
+      }
+    } catch (Exception e) { // catch non-RuntimeExceptions too as bootstrap may be written in Scala
+      long bootstrapTimeMs = (System.nanoTime() - preBootstrap) / 1000000;
+      logger.error("Exception while bootstrapping client after " + bootstrapTimeMs + " ms", e);
+      client.close();
+      throw Throwables.propagate(e);
+    }
+    long postBootstrap = System.nanoTime();
+
+    logger.info("Successfully created connection to {} after {} ms ({} ms spent in bootstraps)",
+      address, (postBootstrap - preConnect) / 1000000, (postBootstrap - preBootstrap) / 1000000);
+
+    return client;
+  }
+```
+真正创建TransportClient的步骤如下：
+1. 构建客户端引导程序，并对其进行设置
+2. 在根引导程序的初始化回调函数中调用TransportContext的initializePipeline方法对Channel的pipeline进行初始化
+3. 使用根引导程序连接远程服务器成功并且初始化Channel的pipeline成功时，将TransportClient和Channel的引用设置到TransportClient原子引用和Channel原子中
+4. 给TransportClient设置引导程序，即设置TransportClientFactory中的TransportBootstrap列表
+5. 返回此TransportClient对象
 #### 2.2.9 ClientPool
 在两个对等节点间维护的关于TransportClient的池子。ClientPool时TransportClientFactory的内部组件
 #### 2.2.10 TransportClient
@@ -388,8 +512,241 @@ RPC框架的客户端，用于获取预先协商好的流中的连续块。旨�
 #### 2.2.13 TransportResponseHandler
 用于处理服务端的响应，并且在对发出请求的客户端进行响应的处理程序
 #### 2.2.14 TransportChannelHandler
-代理由TransportRequestHandler处理的请求和由TransportResponseHandler处理的响应，并加入传输层处理
+代理由TransportRequestHandler处理的请求和由TransportResponseHandler处理的响应，并加入传输层处理  
+TransportChannelHandler实现了Netty的ChannelInboundHandler接口，以便对管道中的消息进行处理，重写了channelRead方法，Netty采用工作链模式对每个ChannelInboundHandler的实现类的channelRead进行链式调用。  
+TransportChannelHandler实现的channelRead方法的具体代码如下：
+```java
+@Override
+public void channelRead(ChannelHandlerContext ctx, Object request) throws Exception {
+  //如果处理的消息是RequestMessage的话则交由TransportRequestHandler做进一步处理
+  if (request instanceof RequestMessage) {
+    requestHandler.handle((RequestMessage) request);
+  //如果处理的消息是ResponseMessage的话则交由TransportResponseHandler做进一步处理
+  } else if (request instanceof ResponseMessage) {
+    responseHandler.handle((ResponseMessage) request);
+  } else {
+    ctx.fireChannelRead(request);
+  }
+}
+```
+##### 2.2.14.1 MessageHandler的继承体系
+TransportRequestHandler和TransportResponseHandler都继承自抽象类MessageHandler，MessageHandler定义了字类的规范，其具体代码如下：
+```java
+public abstract class MessageHandler<T extends Message> {
+  /** Handles the receipt of a single message. */
+  //用于对接受到的单个消息进行处理
+  public abstract void handle(T message) throws Exception;
+  /** Invoked when the channel this MessageHandler is on is active. */
+  //当channel被激活时调用
+  public abstract void channelActive();
+  /** Invoked when an exception was caught on the Channel. */
+  //当捕获一个异常时调用
+  public abstract void exceptionCaught(Throwable cause);
+  /** Invoked when the channel this MessageHandler is on is inactive. */
+  //当channel非激活状态时调用
+  public abstract void channelInactive();
+}
+```
+##### 2.2.14.2 Message的集成体系
+MessageHandler能够处理的都是Message的子类，Message中重要的方法如下：
+```java
+public interface Message extends Encodable {
+  /** Used to identify this request type. */
+  //返回消息的类型
+  Type type();
+  /** An optional body for the message. */
+  //返回消息可选的内容体
+  ManagedBuffer body();
+  /** Whether to include the body of the message in the same frame as the message. */
+  //用于判断消息的主题是否包含在消息的同一帧
+  boolean isBodyInFrame();
+}
+```
+Message继承自Encodable,Encodable的定义如下：
+```java
+public interface Encodable {
+  /** Number of bytes of the encoded form of this object. */
+  int encodedLength();
+  /**
+   * Serializes this object by writing into the given ByteBuf.
+   * This method must write exactly encodedLength() bytes.
+   */
+  void encode(ByteBuf buf);
+}
+```
+实现了Encodable的类可以被转换成ByteBuf，多个对象被存储到单个的、预先分配的ByteBuf中，这里的encodedLength方法返回对象编码之后的字节数
+* ChunkFetchRequest：请求获取流的单个块的序列。
+* RpcRequest：此消息类型由远程的RPC服务端进行处理，是一种需要服务端向客户端回复的RPC请求信息类型。
+* OneWayMessage：此消息也需要由远程的RPC服务端进行处理，与RpcRequest不同的是不需要服务端向客户端回复。
+* StreamRequest：此消息表示向远程的服务发起请求，以获取流式数据。
+由于OneWayMessage 不需要响应，所以ResponseMessage的对于成功或失败状态的实现各有三种，分别是：
+* ChunkFetchSuccess：处理ChunkFetchRequest成功后返回的消息；
+* ChunkFetchFailure：处理ChunkFetchRequest失败后返回的消息；
+* RpcResponse：处理RpcRequest成功后返回的消息；
+* RpcFailure：处理RpcRequest失败后返回的消息；
+* StreamResponse：处理StreamRequest成功后返回的消息；
+* StreamFailure：处理StreamRequest失败后返回的消息；
+##### 2.2.14.3 MessageBuffer的集成体系
+在Message中，返回的内容体为MessageBuffer，MessageBuffer提供了由字节构成数据的不可变视图(也就是说MessageBuffer并不提供数据，也不是数据的实际来源，这同关系型数据库类似)，MessageBuffer定义的行为如下：
+```java
+public abstract class ManagedBuffer {
+  /**
+   * Number of bytes of the data. If this buffer will decrypt for all of the views into the data,
+   * this is the size of the decrypted data.
+   * 返回数据的字节数
+   */
+  public abstract long size();
+  /**
+   * Exposes this buffer's data as an NIO ByteBuffer. Changing the position and limit of the
+   * returned ByteBuffer should not affect the content of this buffer.
+   * 将数据按照nio的ByteBuffer类型返回
+   */
+  // TODO: Deprecate this, usage may require expensive memory mapping or allocation.
+  public abstract ByteBuffer nioByteBuffer() throws IOException;
+  /**
+   * Exposes this buffer's data as an InputStream. The underlying implementation does not
+   * necessarily check for the length of bytes read, so the caller is responsible for making sure
+   * it does not go over the limit.
+   * 将数据按照InputStream返回
+   */
+  public abstract InputStream createInputStream() throws IOException;
+  /**
+   * Increment the reference count by one if applicable.
+   * 当有新的使用者使用此视图时，增加此视图的引用次数
+   */
+  public abstract ManagedBuffer retain();
+  /**
+   * If applicable, decrement the reference count by one and deallocates the buffer if the
+   * reference count reaches zero.
+   * 当有使用者不再使用此视图时，减少此视图的引用次数，当引用数为0时释放缓冲区
+   */
+  public abstract ManagedBuffer release();
+  /**
+   * Convert the buffer into an Netty object, used to write the data out. The return value is either
+   * a {@link io.netty.buffer.ByteBuf} or a {@link io.netty.channel.FileRegion}.
+   *
+   * If this method returns a ByteBuf, then that buffer's reference count will be incremented and
+   * the caller will be responsible for releasing this new reference.
+   * 将缓冲区的数据转换为Netty的对象，用来将数据写到外部，此方法返回的数据类型要么是io.netty.buffer.ByteBuf，要么是io.netty.channel.FileRegion。
+   */
+  public abstract Object convertToNetty() throws IOException;
+}
+```
+具体的MessageBuffer的继承关系如下：
+```text
+ManagedBuffer (org.apache.spark.network.buffer)
+    FileSegmentManagedBuffer (org.apache.spark.network.buffer)
+    NettyManagedBuffer (org.apache.spark.network.buffer)
+    NioManagedBuffer (org.apache.spark.network.buffer)
+    EncryptedManagedBuffer (org.apache.spark.storage)
+    BlockManagerManagedBuffer (org.apache.spark.storage)
+```
+下面以FileSegmentManagedBuffer为例，
 #### 2.2.15 TransportServerBootstrap
 当客户端连接到服务端时在服务端执行一次的引导程序
 #### 2.2.16 TransportServer
-RPC框架的服务端，提供高效的、低级别的流服务
+RPC框架的服务端，提供高效的、低级别的流服务。org.apache.spark.network.TransportContext.createServer(java.lang.String, int, java.util.List<org.apache.spark.network.server.TransportServerBootstrap>)用于创建TransportServer。  
+其具体代码如下：
+```java
+/* Create a server which will attempt to bind to a specific host and port. */
+public TransportServer createServer(
+    String host, int port, List<TransportServerBootstrap> bootstraps) {
+  return new TransportServer(this, host, port, rpcHandler, bootstraps);
+}
+
+/* Creates a new server, binding to any available ephemeral port. */
+public TransportServer createServer(List<TransportServerBootstrap> bootstraps) {
+  return createServer(0, bootstraps);
+}
+
+public TransportServer createServer() {
+  return createServer(0, new ArrayList<>());
+}
+```
+createServer方法有几个重载方法，其最终调用TransportServer的构造器创建一个实例。TransportServer的构造器代码如下：
+```java
+/*
+ * Creates a TransportServer that binds to the given host and the given port, or to any available
+ * if 0. If you don't want to bind to any special host, set "hostToBind" to null.
+ * */
+public TransportServer(
+    TransportContext context,
+    String hostToBind,
+    int portToBind,
+    RpcHandler appRpcHandler,
+    List<TransportServerBootstrap> bootstraps) {
+  this.context = context;
+  this.conf = context.getConf();
+  this.appRpcHandler = appRpcHandler;
+  this.bootstraps = Lists.newArrayList(Preconditions.checkNotNull(bootstraps));
+
+  boolean shouldClose = true;
+  try {
+    init(hostToBind, portToBind);
+    shouldClose = false;
+  } finally {
+    if (shouldClose) {
+      JavaUtils.closeQuietly(this);
+    }
+  }
+}
+```
+TransportServer构造器中的各变量的含义：
+* context:TransportContext的引用
+* conf:TransportConf，这里通过TransportContext来获取相关配置信息
+* appRpcHandler:RPC请求处理器RpcHandler
+* bootstraps:参数传递的服务端引导程序
+TransportServer构造器中的init方法，是对TransportServer进行初始化操作，其代码如下：
+```java
+private void init(String hostToBind, int portToBind) {
+  IOMode ioMode = IOMode.valueOf(conf.ioMode());
+  //根据Netty规范，服务端需要有两个线程组，bossGroup和workGroup
+  EventLoopGroup bossGroup = NettyUtils.createEventLoop(ioMode, conf.serverThreads(), conf.getModuleName() + "-server");
+  EventLoopGroup workerGroup = bossGroup;
+  //创建一个汇集ByteBuf但对本地线程缓存禁用的分配器
+  PooledByteBufAllocator allocator = NettyUtils.createPooledByteBufAllocator(conf.preferDirectBufs(), true /* allowCache */, conf.serverThreads());
+  //创建Netty的服务端根引导程序并对其进行配置
+  bootstrap = new ServerBootstrap()
+    .group(bossGroup, workerGroup)
+    .channel(NettyUtils.getServerChannelClass(ioMode))
+    .option(ChannelOption.ALLOCATOR, allocator)
+    .option(ChannelOption.SO_REUSEADDR, !SystemUtils.IS_OS_WINDOWS)
+    .childOption(ChannelOption.ALLOCATOR, allocator);
+  this.metrics = new NettyMemoryMetrics(allocator, conf.getModuleName() + "-server", conf);
+  if (conf.backLog() > 0) {
+    bootstrap.option(ChannelOption.SO_BACKLOG, conf.backLog());
+  }
+  if (conf.receiveBuf() > 0) {
+    bootstrap.childOption(ChannelOption.SO_RCVBUF, conf.receiveBuf());
+  }
+  if (conf.sendBuf() > 0) {
+    bootstrap.childOption(ChannelOption.SO_SNDBUF, conf.sendBuf());
+  }
+  //为根引导程序设置管道初始化回调函数
+  bootstrap.childHandler(new ChannelInitializer<SocketChannel>() {
+    @Override
+    protected void initChannel(SocketChannel ch) {
+      logger.debug("New connection accepted for remote address {}.", ch.remoteAddress());
+      RpcHandler rpcHandler = appRpcHandler;
+      for (TransportServerBootstrap bootstrap : bootstraps) {
+        rpcHandler = bootstrap.doBootstrap(ch, rpcHandler);
+      }
+      context.initializePipeline(ch, rpcHandler);
+    }
+  });
+  //给根引导程序绑定Socket监听端口
+  InetSocketAddress address = hostToBind == null ? new InetSocketAddress(portToBind): new InetSocketAddress(hostToBind, portToBind);
+  channelFuture = bootstrap.bind(address);
+  channelFuture.syncUninterruptibly();
+  port = ((InetSocketAddress) channelFuture.channel().localAddress()).getPort();
+  logger.debug("Shuffle server started on port: {}", port);
+}
+```
+>根据Netty的API规范，服务端需要有两组线程组bossGroup和workGroup
+
+从以上代码可以看出TransportServer的创建过程如下：
+1. 创建bossGroup和workGroup线程组
+2. 创建一个ByteBuf但对本地线程缓存禁用的分配器
+3. 调用Netty的API，实例化服务端的根引导器并对其进行配置
+4. 为服务端设置管道初始化回调函数，此回调函数首先设置TransportServerBootstrap到根引导程序中，然后调用TransportContext的initializePipeline方法去初始化Channel的pipeline
+5. 给服务端根引导程序设置监听的端口
