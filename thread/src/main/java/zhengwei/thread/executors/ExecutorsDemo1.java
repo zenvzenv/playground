@@ -1,5 +1,6 @@
 package zhengwei.thread.executors;
 
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -12,7 +13,8 @@ import java.util.stream.IntStream;
 public class ExecutorsDemo1 {
     public static void main(String[] args) {
 //        useCachedThread();
-        useFixedThreadPool();
+//        useFixedThreadPool();
+        useSignalThreadPool();
     }
 
     /**
@@ -47,13 +49,13 @@ public class ExecutorsDemo1 {
     /**
      * At any point, at most threads will be active processing tasks.
      * 任何时刻，线程池中线程不变，都是指定的个数
-     *
+     * <p>
      * new ThreadPoolExecutor(nThreads, nThreads, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<Runnable>());
      * core thread size -> nThreads
      * max thread size -> nThreads
      * alive time -> 0s
      * work queue -> LinkedBlockingQueue -> 此阻塞队列默认可以存放Integer.MAX_VALUE个任务
-     *
+     * <p>
      * 比较常用的线程池，线程数两固定，因为核心线程和最大线程数一样，所以线程池中的线程都是核心线程，不会被回收
      * 工作队列则可以结构Integer.MAX_VALUE个任务
      */
@@ -64,6 +66,34 @@ public class ExecutorsDemo1 {
                     try {
                         System.out.println(Thread.currentThread().getName() + " [ " + i + " ] active count -> " + executorService.getActiveCount());
                         TimeUnit.SECONDS.sleep(10);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                }));
+    }
+
+    /**
+     * 线程池中自始至终只会有一个线程
+     *
+     * new FinalizableDelegatedExecutorService(new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS, new LinkedBlockingQueue<Runnable>()));
+     *
+     * core thread size -> 1
+     * max thread size -> 1
+     * alive time ->0s
+     * work queue -> LinkedBlockingQueue -> 最多可接受Integer.MAX_VALUE个任务
+     *
+     * newSignalThreadPool与普通的Thread的区别
+     *  1. 普通的Thread在执行完自己的业务逻辑之后生命周期就结束了，但是SignalThreadPool中的线程将会一直存在
+     *  2. 普通的Thread不能够存储任务，执行完了就执行完了，下次再去执行的时候要再去创建Thread，SignalThreadPool中的线程会去work queue中去获取任务执行
+     */
+    private static void useSignalThreadPool() {
+        ExecutorService executorService = Executors.newSingleThreadExecutor();
+        IntStream.rangeClosed(1, 20)
+                .forEach(i -> executorService.submit(() -> {
+                    try {
+                        System.out.println(Thread.currentThread().getName() + " start working");
+                        TimeUnit.SECONDS.sleep(10);
+                        System.out.println(Thread.currentThread().getName() + " end working");
                     } catch (InterruptedException e) {
                         e.printStackTrace();
                     }
