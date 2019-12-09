@@ -1,11 +1,8 @@
 package zhengwei.util.common;
 
-import org.apache.spark.SparkConf;
+import org.apache.spark.SparkContext;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.sql.SparkSession;
-
-import java.util.Map;
-import java.util.Objects;
 
 /**
  * Spark工具类
@@ -16,38 +13,38 @@ import java.util.Objects;
 public enum SparkUtils {
     INSTANCE;
 
+    private JavaSparkContext jsc;
+
+    private SparkSession session;
+
+    SparkUtils() {
+        session = SparkSession.builder()
+                .master("local[*]")
+                .appName(System.getProperty("SPARK_APP_NAME") == null ? "SparkTest" : System.getProperty("SPARK_APP_NAME"))
+                .config("spark.hadoop.validateOutputSpecs", "false")
+                .getOrCreate();
+        System.out.println("SparkSession init success");
+        SparkContext sparkContext = session.sparkContext();
+        jsc = new JavaSparkContext(sparkContext);
+        System.out.println("JavaSparkContext init success");
+    }
+
     /**
      * 获取JavaSparkContent
      *
-     * @param appName 应用名称
      * @return jsc
      */
-    public JavaSparkContext getJsc(String appName) {
+    public JavaSparkContext getJsc() {
         //可以覆盖之前输出的文件夹
-        SparkConf conf = new SparkConf().setAppName(appName).setMaster("local[*]").set("spark.hadoop.validateOutputSpecs", "false");
-        return new JavaSparkContext(conf);
+        return jsc;
     }
 
     /**
      * 获取SparkSession
      *
-     * @param appName 应用名称
      * @return SparkSession
      */
-    public SparkSession getSparkSession(String appName) {
-        return this.getSparkSession(appName, null);
-    }
-
-    public SparkSession getSparkSession(String appName, Map<String, String> config) {
-        SparkSession.Builder sessionBuilder = SparkSession
-                .builder()
-                .master("local[*]")
-                .appName(appName)
-                .config("spark.hadoop.validateOutputSpecs", "false");
-        if (!Objects.isNull(config)) {
-            config.forEach(sessionBuilder::config);
-        }
-        return sessionBuilder
-                .getOrCreate();
+    public SparkSession getSparkSession() {
+        return session;
     }
 }
