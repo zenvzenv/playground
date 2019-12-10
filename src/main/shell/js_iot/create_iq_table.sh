@@ -2,9 +2,12 @@
 cd $(dirname $0)
 BIN_HOME=$(pwd)
 . ${BIN_HOME}/conf.sh
-year=$(date +"%Y")
-month=$(date +"%m")
-day=$(date +"%d")
+. /sybiq/SYBASE.sh
+. /sybiq/IQ.sh
+delay="+1 day"
+year=$(date -d "${delay}" +"%Y")
+month=$(date -d "${delay}" +"%m")
+day=$(date -d "${delay}" +"%d")
 sybase_iq_db_conn="isql64 -Uasiainfo  -PAsiaInfo2019 -Slocaldb"
 DATA_PATTERN="(YYYY|MM|DD).sql$"
 #start with '#' is not effective
