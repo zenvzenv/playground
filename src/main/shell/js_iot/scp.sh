@@ -2,18 +2,13 @@
 cd $(dirname $0)
 BIN_HOME=$(pwd)
 . ${BIN_HOME}/conf.sh
-#echo ${BIN_HOME}
-#echo ${APP_HOME}
-#echo ${CONF_HOME}
-#echo ${SQL_HOME}
-#echo ${DATA_HOME}
-#echo ${LOGS_HOME}
 scp_cmd=$(which scp)
 mkdir_cmd=$(which mkdir)
-delay="-6 hour"
+delay="-4 hour -30 min"
 source_dir_time=$(date -d "${delay}" +"%Y/%m/%d/%H")
 target_dir_time=$(date -d "${delay}" +"%Y/%m/%d")
-echo "${source_dir_time}"
+echo "${source_dir_time}" >> ${LOGS_HOME}/load_data/load_data_$(date +"%Y%m%%H%M").log
+echo "##############################$(date +"%Y%m%d%H%M%S")######################################" >> ${LOGS_HOME}/scp/scp_$(date +"%Y%m%d").log
 while read table_name
 do
     if [[ x"" != x${table_name} ]]; then
@@ -26,6 +21,7 @@ do
               \"*yes/no\" { send \"yes\r\"; exp_continue }
               \"*password\" { send \"${SCP_PASSWORD}\n\" }
               }
-            expect eof"
+            expect eof" >> ${LOGS_HOME}/scp/scp_$(date +"%Y%m%d").log
     fi
 done < ${CONF_HOME}/table_name.conf
+echo "##############################$(date +"%Y%m%d%H%M%S")######################################" >> ${LOGS_HOME}/scp/scp_$(date +"%Y%m%d").log
