@@ -12,7 +12,8 @@ public class ExecutorServiceDemo1 {
 //        isShutdown();
 //        isTerminated();
 //        executeHasException();
-        threadException();
+//        threadException();
+        executeMyThreadException();
     }
 
     /**
@@ -86,16 +87,41 @@ public class ExecutorServiceDemo1 {
         }
     }
 
+    private static void executeMyThreadException() {
+        final ExecutorService executorService = Executors.newFixedThreadPool(10);
+        IntStream.rangeClosed(1, 10)
+                .forEach(i -> executorService.execute(new MyThread() {
+                    @Override
+                    protected void doExecute() {
+                        System.out.println(Thread.currentThread().getName() + " is doing something");
+                        if (i % 2 == 0) {
+                            int temp = 1 / 0;
+                        }
+                    }
+
+                    @Override
+                    protected void doFailed() {
+                        System.out.println(Thread.currentThread().getName() + " is failed");
+                    }
+
+                    @Override
+                    protected void doInit() {
+                        //do nothing
+                    }
+                }));
+        executorService.shutdown();
+    }
+
     /**
      * 需要在线程里面处理异常的时候，最好还是在线程中定义对于的处理异常的方法
      */
-    private static abstract class MyThread implements Runnable{
+    private static abstract class MyThread implements Runnable {
         @Override
         public void run() {
             try {
                 doInit();
                 doExecute();
-            } catch (Exception e){
+            } catch (Throwable e) {
                 doFailed();
             }
         }
