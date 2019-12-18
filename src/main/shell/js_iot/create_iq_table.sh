@@ -9,7 +9,7 @@ year=$(date -d "${delay}" +"%Y")
 month=$(date -d "${delay}" +"%m")
 day=$(date -d "${delay}" +"%d")
 sybase_iq_db_conn="isql64 -Uasiainfo  -PAsiaInfo2019 -Slocaldb"
-DATA_PATTERN="(YYYY|MM|DD).sql$"
+DATA_PATTERN=".sql$"
 #start with '#' is not effective
 IS_EFFECTIVE="^#"
 #####################CMD###############################
@@ -26,14 +26,15 @@ do
             ${mkdir_cmd} -p ${SQL_HOME}/create_table/${sybase_iq_table_info%.*}
             ${mkdir_cmd} -p ${LOGS_HOME}/create_table
         fi
-        echo "-- create table time -> $(date +"%Y%m%d%H%M")" > ${SQL_HOME}/create_table/${sybase_iq_table_info%.*}/create_table_${sybase_iq_table_info%.*}_${year}${month}${day}.sql
-        echo "-- sybase iq table -> ${sybase_iq_table_info}" > ${SQL_HOME}/create_table/${sybase_iq_table_info%.*}/create_table_${sybase_iq_table_info%.*}_${year}${month}${day}.sql
-        ${cat_cmd} ${SQL_HOME}/${sybase_iq_table_info} >> ${SQL_HOME}/create_table/${sybase_iq_table_info%.*}/create_table_${sybase_iq_table_info%.*}_${year}${month}${day}.sql
-        ${sed_cmd} -i "s/YYYY/${year}/g" ${SQL_HOME}/create_table/${sybase_iq_table_info%.*}/create_table_${sybase_iq_table_info%.*}_${year}${month}${day}.sql
-        ${sed_cmd} -i "s/MM/${month}/g" ${SQL_HOME}/create_table/${sybase_iq_table_info%.*}/create_table_${sybase_iq_table_info%.*}_${year}${month}${day}.sql
-        ${sed_cmd} -i "s/DD/${day}/g" ${SQL_HOME}/create_table/${sybase_iq_table_info%.*}/create_table_${sybase_iq_table_info%.*}_${year}${month}${day}.sql
+        sql_file="${SQL_HOME}/create_table/${sybase_iq_table_info%.*}/create_table_${sybase_iq_table_info%.*}_${year}${month}${day}.sql"
+        echo "-- create table time -> $(date +"%Y%m%d%H%M")" > ${sql_file}
+        echo "-- sybase iq table -> ${sybase_iq_table_info}" > ${sql_file}
+        ${cat_cmd} ${SQL_HOME}/${sybase_iq_table_info} >> ${sql_file}
+        ${sed_cmd} -i "s/YYYY/${year}/g" ${sql_file}
+        ${sed_cmd} -i "s/MM/${month}/g" ${sql_file}
+        ${sed_cmd} -i "s/DD/${day}/g" ${sql_file}
         #exec create table sql
-        ${sybase_iq_db_conn} -i ${SQL_HOME}/create_table/${sybase_iq_table_info%.*}/create_table_${sybase_iq_table_info%.*}_${year}${month}${day}.sql >> ${LOGS_HOME}/create_table/create_table_${sybase_iq_table_info%.*}_${year}${month}${day}.log
+        ${sybase_iq_db_conn} -i ${sql_file} >> ${LOGS_HOME}/create_table/create_table_${sybase_iq_table_info%.*}_${year}${month}${day}.log
     else
         echo "no no no"
     fi

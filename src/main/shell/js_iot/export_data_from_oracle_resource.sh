@@ -5,6 +5,9 @@ BIN_HOME=$(pwd)
 ls_cmd=$(which ls)
 cat_cmd=$(which cat)
 scp_cmd=$(which scp)
+iconv_cmd=$(which iconv)
+mv_cmd=$(which mv)
+rm_cmd=$(which rm)
 spool_file_pattern="resource.sql$"
 file_list=""
 [[ $# -lt 1 ]] && file_list=$(${ls_cmd} "${SQL_HOME}/resource" | egrep "${spool_file_pattern}") || file_list=$@
@@ -13,6 +16,9 @@ for table_spool in ${file_list} ; do
     export_oracle ${spool_file}
     [[ -d "${DATA_HOME}/resource" ]] || mkdir "${DATA_HOME}/resource"
     export_oracle_file="${DATA_HOME}/resource/${table_spool%_*}.txt"
+    ${iconv_cmd} -f gb18030 -t utf-8 "${export_oracle_file}" -o "${export_oracle_file}.U8"
+    ${rm_cmd} "${export_oracle_file}"
+    ${mv_cmd} "${export_oracle_file}.U8" "${export_oracle_file}"
     echo ${export_oracle_file}
     if [[ -f ${export_oracle_file} ]]; then
         expect -c"
