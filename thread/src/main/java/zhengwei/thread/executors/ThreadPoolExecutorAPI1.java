@@ -12,8 +12,8 @@ import java.util.concurrent.*;
 public class ThreadPoolExecutorAPI1 {
     public static void main(String[] args) throws ExecutionException, InterruptedException {
 //        testInvokeAny();
-//        testInvokeAll();
-        testSubmit();
+        testInvokeAll();
+//        testSubmit();
     }
 
     /**
@@ -35,6 +35,12 @@ public class ThreadPoolExecutorAPI1 {
         System.out.println("invoke any -> " + integer);
     }
 
+    /**
+     * {@link ThreadPoolExecutor#invokeAll(Collection tasks)}
+     * invokeAll返回回来的Future集合中，是乱序的，我们不知道集合中的任务执行完毕的先后顺序，
+     * 这样在我们去获取结果的时候会很被动
+      * @throws InterruptedException 主调线程去Future中get结果的中断异常
+     */
     private static void testInvokeAll() throws InterruptedException {
         ThreadPoolExecutor service = (ThreadPoolExecutor) Executors.newFixedThreadPool(5);
         List<Callable<Integer>> tasks = new ArrayList<>();
