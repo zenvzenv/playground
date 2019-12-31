@@ -1,4 +1,4 @@
-package zhengwei.thread.executors;
+package zhengwei.thread.future;
 
 import java.util.concurrent.*;
 import java.util.function.BiConsumer;
