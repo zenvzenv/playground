@@ -6,6 +6,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
 /**
@@ -82,6 +83,52 @@ public class CompletableFutureCombination {
             System.out.println("end to run after both");
             return 88;
         }), () -> System.out.println("both completable future is finished"));
+    }
+
+    /**
+     * {@link CompletableFuture#thenCombine(CompletionStage other, BiFunction combine)}
+     * 将两个CompletableFuture的结果进行组合操作，combine的BiFunction的两个入参就是前面两个CompletableFuture的结果，返回值是对这两结果进行操作之后的返回值。
+     * {@link CompletableFuture#whenComplete(BiConsumer action)}与{@link CompletableFuture#thenCombine(CompletionStage other, BiFunction combine)}
+     * 有点类似，但是whenComplete没有返回值，只是对结果和异常进行一些消费操作，而thenCombine则是有返回值的，对之前两个CompletableFuture的结果进行一些操作后的结果
+     */
+    private static void testCombine() {
+        CompletableFuture
+                .supplyAsync(() -> {
+                    System.out.println("start to supply");
+                    sleep(2);
+                    System.out.println("end to supply");
+                    return "supply";
+                })
+                .thenCombine(
+                        CompletableFuture.supplyAsync(() -> {
+                            System.out.println("start to combine");
+                            sleep(3);
+                            System.out.println("end to combine");
+                            return 100;
+                        }),
+                        (s, i) -> s.length() > i)
+                .whenComplete((v, t) -> System.out.println(v));
+    }
+
+    private static void testCompose() {
+        CompletableFuture
+                .supplyAsync(() -> {
+                    System.out.println("start to supply");
+                    sleep(3);
+                    System.out.println("end to supply");
+                    return "supply";
+                })
+                .thenCompose(s -> CompletableFuture.supplyAsync(//s为上一个CompletableFuture的输出的结果
+                        () -> {
+                            {
+                                System.out.println("start to compose");
+                                sleep(4);
+                                System.out.println("end to compose");
+                                return s.length();
+                            }
+                        })
+                )
+                .thenAccept(System.out::println);
     }
 
     @SneakyThrows
