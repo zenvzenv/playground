@@ -1,4 +1,4 @@
-package zhengwei.thread.executors;
+package zhengwei.thread.future;
 
 import java.util.Collection;
 import java.util.concurrent.*;
