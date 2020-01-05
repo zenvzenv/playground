@@ -9,7 +9,7 @@ import java.util.Arrays;
 
 /**
  * scattering:一个数据可以被分散的写入多个ByteBuffer中
- * gathering:多个ByteBuffer可以一并写出到一个响应中
+ * gathering:多个ByteBuffer可以依次读出
  *
  * @author zhengwei AKA Awei
  * @since 2019/12/1 11:14
