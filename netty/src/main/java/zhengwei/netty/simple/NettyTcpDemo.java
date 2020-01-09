@@ -11,9 +11,20 @@ import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.util.CharsetUtil;
 import lombok.SneakyThrows;
-import org.apache.avro.ipc.NettyServer;
+
+import java.util.concurrent.TimeUnit;
 
 /**
+ * 1. channel和pipeline是相互包含的关系，可以通过channel获取到pipeline，也可以通过pipeline获取channel
+ * 2. bossGroup和workerGroup中默认的NioEventLoop个数为CPU核数*2(即8核有16线程)，也可以自己手动设置NioEventLoop的个数
+ * 3. pipeline底层是一个双向链表
+ *
+ * NioEventLoopGroup包含多个NioEventLoop,NioEventLoop说白了就是一个监听事件的线程。
+ * NioEventLoop中包含一个Selector、taskQueue、scheduleTaskQueue
+ * 每个NioEventLoop中的Selector中监听多个NioChannel(Channel注册到Selector上)
+ * 每个NioChannel绑定在一个NioEventLoop(线程)上
+ * 每个NioEventLoop绑定一个ChannelPipeline，两者可以互相获取
+ *
  * @author zhengwei AKA Awei
  * @since 2020/1/8 20:12
  */
@@ -73,6 +84,9 @@ public class NettyTcpDemo {
                         .handler(new ChannelInitializer<SocketChannel>() {
                             @Override
                             protected void initChannel(SocketChannel socketChannel) throws Exception {
+                                //可以使用一个集合管理用户和SocketChannel的关系
+                                //就可以将业务加入到channel中对应的NioEventLoop的taskQueue或者scheduleTaskQueue
+                                System.out.println("client socket channel -> " + socketChannel.hashCode());
                                 //加入自己的处理器
                                 socketChannel.pipeline().addLast(new NettyClientHandler());
                             }
@@ -101,14 +115,55 @@ public class NettyTcpDemo {
          * @param ctx 上下文对象，内部含有管道pipeline(针对数据的处理)，通道channel(针对数据的读写)，连接的地址...
          * @param msg 客户端发送的数据，默认是Object类型
          */
+        @SneakyThrows
         @Override
         public void channelRead(ChannelHandlerContext ctx, Object msg) {
-            System.out.println("server context -> " + ctx);
+            /*System.out.println("server context -> " + ctx);
+            System.out.println("handle thread -> " + Thread.currentThread().getName());
             //将msg转成ByteBuffer
             //ByteBuf由Netty提供，不是NIO的ByteBuffer
             ByteBuf buf = (ByteBuf) msg;
             System.out.println("the message from client is " + buf.toString(CharsetUtil.UTF_8));
-            System.out.println("client address -> " + ctx.channel().remoteAddress());
+            System.out.println("client address -> " + ctx.channel().remoteAddress());*/
+
+            //假设有一个非常耗时的操作
+            /*System.out.println("start to sleep");
+            //此时客户端和服务端都会阻塞在这
+            TimeUnit.SECONDS.sleep(10);
+            System.out.println("end to sleep");
+            ctx.writeAndFlush(Unpooled.copiedBuffer("I am awake\n", CharsetUtil.UTF_8));*/
+
+            /*
+            上面的代码，线程睡眠时，会导致客户端和服务端都阻塞
+            我们想要异步执行，需要将任务提交给该channel对应的NioEventLoop的taskQueue中去执行或者scheduleTaskQueue中去执行，
+            需要注意的是，taskQueue是由一个NioEventLoop维护的，即是单线程从taskQueue/scheduleTaskQueue中取任务执行
+            按提交顺序执行任务
+             */
+            ctx.channel().eventLoop().execute(() -> {
+                try {
+                    TimeUnit.SECONDS.sleep(5);
+                    ctx.writeAndFlush(Unpooled.copiedBuffer("I am awake from task queue1\n", CharsetUtil.UTF_8));
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            });
+            ctx.channel().eventLoop().execute(() -> {
+                try {
+                    TimeUnit.SECONDS.sleep(5);
+                    ctx.writeAndFlush(Unpooled.copiedBuffer("I am awake from task queue2\n", CharsetUtil.UTF_8));
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            });
+            ctx.channel().eventLoop().schedule(() -> {
+                try {
+                    TimeUnit.SECONDS.sleep(5);
+                    ctx.writeAndFlush(Unpooled.copiedBuffer("I am awake from task queue3\n", CharsetUtil.UTF_8));
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }, 5, TimeUnit.SECONDS);
+            System.out.println("end to sleep");
         }
 
         /**
