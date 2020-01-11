@@ -10,6 +10,7 @@ import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.util.CharsetUtil;
+import io.netty.util.concurrent.Future;
 import lombok.SneakyThrows;
 
 import java.util.concurrent.TimeUnit;
@@ -18,7 +19,7 @@ import java.util.concurrent.TimeUnit;
  * 1. channel和pipeline是相互包含的关系，可以通过channel获取到pipeline，也可以通过pipeline获取channel
  * 2. bossGroup和workerGroup中默认的NioEventLoop个数为CPU核数*2(即8核有16线程)，也可以自己手动设置NioEventLoop的个数
  * 3. pipeline底层是一个双向链表
- *
+ * <p>
  * NioEventLoopGroup包含多个NioEventLoop,NioEventLoop说白了就是一个监听事件的线程。
  * NioEventLoop中包含一个Selector、taskQueue、scheduleTaskQueue
  * 每个NioEventLoop中的Selector中监听多个NioChannel(Channel注册到Selector上)
@@ -36,6 +37,7 @@ public class NettyTcpDemo {
             1. 创建BossGroup和WorkerGroup线程组
             2. bossGroup只处理连接请求，真正处理客户端的业务请求的时workerGroup
             3. 两个都是无限循环
+            4. bossGroup和workerGroup的实际类型是NioEventLoopGroup，在其中的监听线程是NioEventLoop，而NioEventLoop的个数默认=实际CPU的核心数 * 2(即8核16线程)
              */
             EventLoopGroup bossGroup = new NioEventLoopGroup();
             EventLoopGroup workGroup = new NioEventLoopGroup();
@@ -55,14 +57,23 @@ public class NettyTcpDemo {
                         });//给workerGroup的EventLoop对应的管道设置处理器
                 System.out.println("server is ready");
                 //绑定一个端口，生成ChannelFuture对象
-                //启动服务器
+                //启动服务器，这边不会阻塞住下面的代码，可以注册一个监听器，等待方法执行完毕之后回调监听器
                 final ChannelFuture channelFuture = bootstrap.bind(8888).sync();
+                channelFuture.addListener(NettyTcpServer::operationComplete);
                 //对关闭通道进行监听
                 channelFuture.channel().closeFuture().sync();
             } finally {
                 //关闭线程组
                 bossGroup.shutdownGracefully();
                 workGroup.shutdownGracefully();
+            }
+        }
+
+        private static void operationComplete(Future<? super Void> future) {
+            if (future.isSuccess()) {
+                System.out.println("server start successful");
+            } else {
+                System.out.println("server start failed");
             }
         }
     }
