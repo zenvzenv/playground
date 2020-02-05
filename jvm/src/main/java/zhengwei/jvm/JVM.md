@@ -616,7 +616,7 @@
     7. Java堆的划分
         1. 新生代与老年代
         2. Eden(8):From Survivor(1):To Survivor(1)=8:1:1
-5. 方法区 aka Permanent Generation(永久代) (**线程共享**)
+5. 方法区 aka ~~Permanent Generation(永久代)~~ 元空间 (**线程共享**)
     1. 用于存储已被虚拟机**加载的类信息、常量、静态变量、即时编译器编译后的代码**等数据，**方法区包含静态常量池和运行时常量池**，注意：如果一个静态变量是引用类型的话，那么所引用的对象是存放在Java Heap中的，该对象的引用会存在方法区
         1. 这个类型的全限定名
         2. 这个类的直接父类的全限定名(**`java.lang.Object` 除外**)，其他类型若没有声明直接父类，默认父类是Object
@@ -930,3 +930,84 @@ jstack -F [-m] [-l] <pid>
 * 新生代分为3个区(各个区的内存比例是可以通过参数调整的)
     1. Eden区：占新生代80%的内存空间，对象在此生成，
     2. 两个survivor区：占新生代20%空间，每个survivor各自占10%，两个survivor完全对称，轮流替换。
+##### 老年代(old generation)
+* 存放经过一次或多次GC还存活的对象
+* 一般采用mark-sweep或mark-compact算法进行GC
+* 有多种垃圾收集器可以选择。每种垃圾收集器可以看作是一个GC算法的实现。可以根据具体应用的需求选用合适的垃圾收集器(吞吐量或响应时间)
+##### ~~永久代~~
+~~在Java8之前存在，在Java8之后被元空间取代~~
+~~* 并不属于堆，被称为非堆，但是GC会涉及这个区域~~
+~~* 存放Class的结构信息，包括常量池、字段描述、方法描述。与垃圾收集要回收的Java对象关系不大~~
+### 内存分配
+1. 堆上分配
+大多数情况在Eden区分配，偶尔会直接在old区分配，具体实现取决于GC
+2. 栈上分配
+原子类型局部变量
+### 内存回收
+* GC要做的就是将dead的对象进行回收，释放内存
+* Oracle的HotSpot虚拟机认为没有被引用的对象就是dead的对象
+* HotSpot虚拟机将对象的引用分为四种： 
+    1. strong： `Object o = new Object()` 就是强引用
+    2. soft：继承于Reference类型，在GC时，内存不够时会将弱引用对象回收掉；长时间不用的对象也会被回收掉
+    3. weak：继承于Reference类型，一定会被GC，当对象被mark为dead时，会在ReferenceQueue中进行通知
+    4. phantom：继承于Reference类型，本来就没有引用，当从jvm heap中释放时会通知
+### GC的时机
+在分代模型的基础上，GC从时机上分为两种：Scavenge GC和Full GC
+#### Scavenge GC(Minor GC)
+* 触发时机：新对象生成时，Eden区满了
+* 理论上Eden区大多数对象都会在Scavenge GC进行回收，复制算法的执行效率会很高，Scavenge GC的时间会比较短
+#### Full GC(Major GC)
+* 堆整个JVM进行整理，包括young、old和perm
+* 主要触发时机：
+    1. old满了
+    2. perm满了
+    3. System.gc()
+* 效率低下，尽量避免
+### 垃圾回收器(Garbage Collector)
+* 分代模型：GC的宏观愿景
+* 垃圾回收器：GC的具体实现
+* HotSpot提供多种垃圾回收器，我们需要根据具体应用来选择合适的垃圾回收器
+* 没有万能的收集器，每种垃圾收集器都有自己的适用场景
+#### 并行与并发
+* 并行(parallel)：是指多个垃圾收集线程同时进行工作，但是用户线程处于等待状态
+* 并发(concurrent)：是指垃圾收集线程与用户线程同时进行工作
+    * 注意：并发并不代表解决了GC的停顿问题(stop the world)，在关键的步骤还是要停顿的。比如在收集器标记垃圾时。但在清理垃圾的时候用户线程可以和收集器线程同时工作
+#### Serial收集器(young)
+* 单线程收集器，收集时会暂停所有工作线程(Stop The World，STW)，使用复制算法，当虚拟机运行在Client模式下时，新生代默认采用Serial收集器
+* 在新生代和老年代都可以使用
+* 是新生代中收集器，使用复制算法
+* 因为是单线程，没有多线程切换的额外开销，简单实用
+* HotSpot Client缺省的新生代收集器
+#### ParNew收集器(young)
+* ParNew收集器就是Serial收集器的多线程版本，除了使用多线程收集外，其余行为(算法、STW、对象分配规则和回收策略)均与Serial收集器一致。
+* 对应的这种收集器是虚拟机运行在Server模式下的默认新生代收集器，**在单CPU情况下，ParNew收集器并不会比Serial收集器有更好的效果**
+* 只有在多CPU情况下，ParNew收集器的效率比Serial收集器的效率高。
+* 可以通过 `-XX:ParallelGCThreads` 来控制GC的线程数量。需要集合具体的CPU的核心数来制定
+* HotSpot Server缺省的新生代收集器是ParNew收集器
+#### Parallel Scavenge收集器(young)
+Parallel Scavenge收集器也是一个多线程收集器，也是使用复制算法，但它的对象分配规则与回收策略都与ParNew收集器有所不同，它是以吞吐量最大化(即GC时间占总运行时间最小)为目标的收集器实现。它允许较长时间的STW换取总吞吐量最大话。
+#### Serial Old收集器(old)
+* 和Serial一样是单线程收集器，是老年代收集器，使用标记整理算法
+#### Parallel Old收集器(old)
+* 老年代版本吞吐量优先的收集器，使用多线程和和标记整理算法，JVM1.6提供，在此之前，如果新生代使用了Parallel Scavenge收集器的话，老年代除Serial Old外别无选择，应为Parallel Scavenge无法与CMS收集器一起工作
+* Parallel Scavenge + Parallel Old = 高吞吐量，但GC停顿时间可能不理想
+#### CMS(Concurrent Mark Sweep)收集器(old)
+* CMS是一种以最短停顿时间为目标的收集器，使用CMS并不能达到GC效率最高(总体GC时间最少)，但它能尽可能降低GC时服务停顿时间，CMS使用**标记－清除算法**
+* 使用 `-XX:UseConcMarkSweepGC` 开启
+* 只有在多CPU下使用才有意义
+* 只针对老年代，一般结合ParNew收集器使用
+* Concurrent，GC线程和用户程序并发工作(尽量并发)
+##### 缺点
+* CMS以牺牲CPU资源为代价来减少用户线程的停顿。当CPU个数少于4个时，有可能对吞吐量影响很大
+* CMS在并发清理过程中，用户线程还在跑，这时需要预留一部分空间给用户线程
+* CMS使用mark-sweep算法来进行垃圾回收，会带来碎片化问题。碎片过多会造成Full GC的发生
+### Java内存泄露的经典原因
+1. 对象定义在错误的范围(wrong scope)
+2. 异常(Exception)处理不当
+未正确的关闭相关资源时，会导致JVM中资源膨胀
+3. 集合数据管理不当
+    * 当使用Array-Base的数据结构时(如ArrayList或者HashMap时)，尽量避免resize
+        * 比如在声明ArrayList时，应尽量估算size，在创建时就确定size的值
+        * 减少resize可以避免没有必要的array copying，gc碎片等问题
+    * 如果一个List只需要顺序访问，不需要随机访问(random access)，就用LinkList代替ArrayList
+        * LinkedList本质是链表，不需要resize。
