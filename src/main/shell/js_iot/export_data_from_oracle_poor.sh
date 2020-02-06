@@ -46,11 +46,11 @@ for table_spool in ${file_list} ; do
     [[ -d "${DATA_HOME}/poor" ]] || mkdir "${DATA_HOME}/poor"
     export_oracle_file="${DATA_HOME}/poor/${table_spool%_*}"
     final_file="${export_oracle_file%_*}_${year}${mouth}${day}${hour}${minute}.txt"
-    ${iconv_cmd} -f gb18030 -t utf-8 "${final_file}" -o "${final_file}.U8"
-    ${rm_cmd} "${final_file}"
-    ${mv_cmd} "${final_file}.U8" "${final_file}"
-    echo ${final_file}
     if [[ -f ${final_file} ]]; then
+        ${iconv_cmd} -f gb18030 -t utf-8 "${final_file}" -o "${final_file}.U8"
+        ${rm_cmd} "${final_file}"
+        ${mv_cmd} "${final_file}.U8" "${final_file}"
+        echo ${final_file}
         expect -c"
             set timeout -1
             spawn ${scp_cmd} ${final_file} ${SCP_USER}@${SCP_IP}:${SCP_TARGET_FILE_PATH_PREFIX}/poor/${target_file_path_time}
