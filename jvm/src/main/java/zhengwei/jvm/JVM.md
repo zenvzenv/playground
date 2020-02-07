@@ -878,7 +878,7 @@ jstack -F [-m] [-l] <pid>
 ### jvisualvm
 图形化JVM分析工具，里面有heap、stack、memory、deadlock……等信息。
 ### jmc(java mission control)
-可以实时监控JVM的运行情况。
+图形化JVM分析工具，可以实时监控JVM的运行情况。
 ## 七、GC
 ### GC算法
 #### 引用技术算法(reference counting)
@@ -1011,3 +1011,25 @@ Parallel Scavenge收集器也是一个多线程收集器，也是使用复制算
         * 减少resize可以避免没有必要的array copying，gc碎片等问题
     * 如果一个List只需要顺序访问，不需要随机访问(random access)，就用LinkList代替ArrayList
         * LinkedList本质是链表，不需要resize。
+## JVM参数
+### 常用参数
+* -verbose:gc：打印出详细的gc日志
+* -Xms20m：指定堆初始大小
+* -Xmx20m：指定堆最大的大小
+* -Xss100k：指定虚拟机栈大小
+* -Xmn10m：指定堆中的新生代大小
+* -XX:PrintGCDetails：打印出堆详细信息
+* -XX:SurvivorRatio=8：指定Eden区和Survivor区的大小比例
+* -XX:+PrintCommandLineFlags：打印出JVM的默认启动参数
+* -XX:+TraceClassLoading：跟踪class加载的情况
+* -XX:MaxMatespaceSize=10m：指定元空间大小，并不会进行扩展
+* -XX:HeapDumpOnOutOfMemory：指定在发生堆溢出时，转储堆信息
+* -XX:PretenureSizeThreshold=111：单位为字节(byte)，新生对象直接晋升到老年代的阈值，**需配合 `-XX:+UseSerialGC` 一起使用，否则不起作用**
+* -XX:+UseCompressedOops：针对32位程序运行在64位JVM上时，对于特定的指针进行压缩，以免占用过多内存
+* -XX:+UseCompressedClassPointers：使用指针压缩
+### GC选择参数
+* -XX:+UseParallelGC：使用并行垃圾收集器，新生代使用Parallel Scavenge GC，老年代使用Parallel Old GC
+* -XX:+UseSerialGC：使用串行垃圾收集器，新生代使用Serial GC，老年代使用Serial Old GC
+### 注意点
+1. 对于 `System.gc()` 的理解
+System.gc()是告诉JVM接下来进行一次Full GC，但是具体什么时候去执行，最终由JVM自己决定，它的主要作用就是在没有对象创建的时候，去进行一次GC，因为平时触发GC是在对象创建时导致内存空间不足才会触发
