@@ -1027,9 +1027,20 @@ Parallel Scavenge收集器也是一个多线程收集器，也是使用复制算
 * -XX:PretenureSizeThreshold=111：单位为字节(byte)，新生对象直接晋升到老年代的阈值，**需配合 `-XX:+UseSerialGC` 一起使用，否则不起作用**
 * -XX:+UseCompressedOops：针对32位程序运行在64位JVM上时，对于特定的指针进行压缩，以免占用过多内存
 * -XX:+UseCompressedClassPointers：使用指针压缩
+* -XX:MaxTenuringThreshold=5：在JVM可以自动调节对象晋升(Promote)到老年代阈值的GC中，设置晋升到老年代的最大对象年龄，该参数的默认值是15，CMS中默认值位6，G1中默认15(在JVM中，该数值是由4bit来表示的，所以最大值位1111即15)
+    经历多次Minor GC后，存活的对象会在From Survivor和To Survivor之间来回存放，而这一前提就是两个空间有足够多的空间来存放这些数据，在GC算法中，
+    会计算每个对象的年龄，如果空间中某个年龄的对象已经占据了Survivor空间的50%(这个比例可以自定义)，那么这时JVM会自动调整阈值，不在使用默认的晋升阈值去将新生代中的对象晋升到老年代，
+    因为默认的晋升阈值会会导致Survivor空间不足，所以需要调整阈值，让这些存活的老对象尽快晋升到老年代。
+* -XX:TargetSurvivorRatio=60：此参数为一个百分比，表示在Survivor空间中存活的对象达到60%时，那么JVM就重新计算MaxTenuringThreshold(晋升到老年代的对象年龄阈值)
+* -XX:+PrintTenuringDistribution：打印出对象在Survivor区的对象年龄的情况
+* -XX:+PrintGCDetailsStamps：打印GC的时间戳
+
 ### GC选择参数
 * -XX:+UseParallelGC：使用并行垃圾收集器，新生代使用Parallel Scavenge GC，老年代使用Parallel Old GC
 * -XX:+UseSerialGC：使用串行垃圾收集器，新生代使用Serial GC，老年代使用Serial Old GC
+* -XX:+UseConcMarkSweepGC：指定老年代使用CMS垃圾收集器，需要再指定一个新生代垃圾收集器
+* -XX:+UseParNewGC：指定新生代使用ParNew GC，并行垃圾收集器
+
 ### 注意点
 1. 对于 `System.gc()` 的理解
 System.gc()是告诉JVM接下来进行一次Full GC，但是具体什么时候去执行，最终由JVM自己决定，它的主要作用就是在没有对象创建的时候，去进行一次GC，因为平时触发GC是在对象创建时导致内存空间不足才会触发
