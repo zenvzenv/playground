@@ -37,13 +37,23 @@ Spark在1.6.x版本采用的是静态的内存管理机制，在2.x.x版本之�
   MemoryManager 的具体实现上，Spark 1.6 之后默认为统一管理(Unified Memory Manager)方式，1.6 之前采用的静态管理(Static Memory Manager)方式仍被保留，可通过配置 `spark.memory.useLegacyMode` 参数启用。两种方式的区别在于对空间分配的方式。
 ## Spark 1.6.x静态内存管理
   在 Spark 最初采用的静态内存管理机制下，存储内存、执行内存和其他内存的大小在 Spark 应用程序运行期间均为固定的，但用户可以应用程序启动前进行配置，堆内内存的分配如下图所示：
-  ![spark_static_memory_model](jetbrains://idea/navigate/reference?project=playground&path=mdimage/spark_static_memory_model.png)
+  ![spark_static_memory_model](https://github.com/zw030301/playground/blob/master/spark/src/main/resources/mdimage/spark_static_memory_model.png)
   可以看到，可用的堆内内存的大小需要按照下面的方式计算：
   ```text
   可用的存储内存 = systemMaxMemory * spark.storage.memoryFraction * spark.storage.safetyFraction
   可用的执行内存 = systemMaxMemory * spark.shuffle.memoryFraction * spark.shuffle.safetyFraction
   ```
 其中 systemMaxMemory 取决于当前 JVM 堆内内存的大小，由-executor-memory，最后可用的执行内存或者存储内存要在此基础上与各自的 memoryFraction 参数和 safetyFraction 参数相乘得出。上述计算公式中的两个 safetyFraction 参数，其意义在于在逻辑上预留出 1-safetyFraction 这么一块保险区域，降低因实际内存超出当前预设范围而导致 OOM 的风险（上文提到，对于非序列化对象的内存采样估算会产生误差）。值得注意的是，这个预留的保险区域仅仅是一种逻辑上的规划，在具体使用时 Spark 并没有区别对待，和"其它内存"一样交给了 JVM 去管理。
+堆外的空间分配较为简单，只有存储内存和执行内存，如图 3 所示。可用的执行内存和存储内存占用的空间大小直接由参数 spark.memory.storageFraction 决定，由于堆外内存占用的空间可以被精确计算，所以无需再设定保险区域。
+静态内存管理机制实现起来较为简单，但如果用户不熟悉 Spark 的存储机制，或没有根据具体的数据规模和计算任务或做相应的配置，很容易造成"一半海水，一半火焰"的局面，即存储内存和执行内存中的一方剩余大量的空间，而另一方却早早被占满，不得不淘汰或移出旧的内容以存储新的内容。由于新的内存管理机制的出现，这种方式目前已经很少有开发者使用，出于兼容旧版本的应用程序的目的，Spark 仍然保留了它的实现。
+### 涉及到的Spark配置属性
+`spark.shuffle.memoryFraction = 0.2` Exception内存区域，该区域用于缓存shuffle过程中产生的临时数据，
+`spark.shuffle.safety.memoryFraction = 0.8` Exception内存区域中并不是所有的内存都是可用的，Spark会留存一个安全区域用于防止OOM的发生，该系数就是控制Exception内存区域中的可用区域即Exception区域的0.8，即占全部内存的 `spark.shuffle.memoryFraction * spark.shuffle.safetyFraction = 0.16`
+`1 - spark.shuffle.safety.memoryFraction` Execution的安全区域，为了防止发生OOM错误
+`spark.storage.memoryFraction = 0.6` Storage内存区域， 用于缓存RDD数据和broadcast数据
+`spark.storage.safetyFraction = 0.9` Storage内存区域可用空间，占全部内存空间的 `spark.storage.memoryFraction * spark.storage.safety.memoryFraction = 0.54`
+`1 - spark.storage.safetyFraction` Storage内存区域的安全空间
+`user memory = 1- spark.shuffle.memoryFraction - spark.storage.memoryFraction`
 ## Spark 2.x.x统一内存管理
 在默认情况下，Spark会只会使用堆内内存，Executor会将内存划分成以下几块：
 * Execution内存：主要用于缓存Shuffle过程中产生的中间数据，即join、sort、aggregate等计算过程中的临时数据
