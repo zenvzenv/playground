@@ -285,7 +285,39 @@ object SparkTransportConf {
 从SparkTransportConf#fromSparkConf这个方法可以直到，创建TransportConf是从SparkConf中得到的。  
 主要传递三个参数，Spark的配置信息SparkConf、module模块名和内核数numUsableCores。如果numUsableCores的数量小于0，那么就取当先可用的线程数量，用于网络传输的最大线程数量最大就为8个，最终确定了线程数量之后就回去设置，客户端传输线程数(spark.$module.io.clientThreads)和服务端传输线程数(spark.$module.io.serverThreads).  
 #### 2.2.3 RpcHandler
-对调用传输客户端(TransportClient)的sendRPC方法发送的消息进行处理的程序
+对调用传输客户端(TransportClient)的sendRPC方法发送的消息进行处理的程序。  
+TransportRequestHandler实际是将请求交由RpcHandler处理。RpcHandler是一个抽象类，定义了RPC处理器的一些规范，其定义的代码如下：
+```java
+public abstract class RpcHandler {
+    private static final RpcResponseCallback ONE_WAY_CALLBACK = new OneWayRpcCallback();
+    //用来接受单一的RPC信息，具体处理交由子类去实现
+    //RpcResponseCallback用于请求处理结束之后进行回调，无论处理结果是否成功，都会被调用一次
+    public abstract void receive(TransportClient client, ByteBuffer message, RpcResponseCallback callback);
+    public StreamCallbackWithID receiveStream(TransportClient client, ByteBuffer messageHeader, RpcResponseCallback callback) { throw new UnsupportedOperationException(); }
+    public abstract StreamManager getStreamManager();
+    //重载的receive方法，只接受client和message，RpcResponseCallback默认为ONE_WAY_CALLBACK，不会对客户端做出回应
+    public void receive(TransportClient client, ByteBuffer message) { receive(client, message, ONE_WAY_CALLBACK); }
+    public void channelActive(TransportClient client) { }
+    public void channelInactive(TransportClient client) { }
+    public void exceptionCaught(Throwable cause, TransportClient client) { }
+    private static class OneWayRpcCallback implements RpcResponseCallback {
+    private static final Logger logger = LoggerFactory.getLogger(OneWayRpcCallback.class);
+        @Override
+        public void onSuccess(ByteBuffer response) {
+          logger.warn("Response provided for one-way RPC.");
+        }
+        
+        @Override
+        public void onFailure(Throwable e) {
+          logger.error("Error response provided for one-way RPC.", e);
+        }
+    }
+}
+public interface RpcResponseCallback {
+  void onSuccess(ByteBuffer response);
+  void onFailure(Throwable e);
+}   
+```
 #### 2.2.4 MessageEncoder
 消息编码器，将消息放入pipline之前需要先对消息内容进行编码，防止管道另一端读取时丢包或解析错误
 #### 2.2.5 MessageDecoder
@@ -350,7 +382,7 @@ public interface TransportClientBootstrap {
 ```
 TransportClientBootstrap接口有两个实现类，AuthClientBootstrap和SaslClientBootstrap.
 ##### 2.2.8.2 创建RPC客户端-TransportClient
-有了TransportClientFactory之后。Spark的各个组件就可以使用它来创建用于通讯的TransportClient了。每个TransportClient只能和一个远端的RPC服务通讯，所以Spark中的组件如果想要和多个RPC服务通讯，就需要只有多个TransportClient实例。
+有了TransportClientFactory之后。Spark的各个组件就可以使用它来创建用于通讯的TransportClient了。每个TransportClient只能和一个远端的RPC服务通讯，所以Spark中的组件如果想要和多个RPC服务通讯，就需要持有多个TransportClient实例。
 创建TransportClient的方法代码如下(**实际是从缓存中获取TransportClient**)：
 ```java
 //org.apache.spark.network.client.TransportClientFactory.createClient(java.lang.String, int)
