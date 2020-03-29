@@ -245,3 +245,60 @@ A buffer's position is the index of the next element to be read or written.  A b
 limit与position的值会在操作时被考虑到，程序会去检查其值是否符合相应规范
 #### 绝对方法
 完全忽略limit与position，直接根据Buffer的索引去获取数据
+##零拷贝
+
+## Netty
+### 组件
+#### EventLoopGroup
+事件循环组，本质就是一个线程池，最终继承自 `java.util.concurrent.ExecutorService`，并对其进行扩展，提供了获取内部的EventLoop对象的方法，
+```java
+
+```
+#### NioEventLoopGroup
+Nio的事件循环组，接受一个 `int` 类型的参数，此参数的作用是在启动事件循环组时启动多少个线程，默认是CPU个数的两倍。
+这个类主要是初始化一些Netty的一些参数，最终调用的是 `protected MultithreadEventExecutorGroup(int nThreads, Executor executor, EventExecutorChooserFactory chooserFactory, Object... args)` ，即初始化了启动的线程个数、
+线程池、事件执行器选择工厂和
+#### Future
+Netty中的Future继承自jdk中的Future，Netty在jdk的基础上进行了扩展。jdk中的Future支持对线程完全异步操作，不会阻塞住，会立即返回，需要自己手动调用 `V get()` 或 `V get(long timeout, TimeUnit unit)` 进行获取最后的结果，
+当最终结果还没有计算出来时，调用get方法还是会阻塞的；如果结果已经被计算出来，那么调用get时会立即返回结果，不会立即返回；而jdk的Future的最大的一个问题就是get方法应该在何时调用，Netty的Future解决了这个通电。
+而Netty的Future的接口对jdk的Future进行了扩展，可以准确的获取到任务的执行的状态，和添加了相应的回调方法，类似于观察者模式。
+#### ChannelFuture
+* 继承自Netty的Future<Void>接口
+* ChannelFuture中承载了异步的Future
+* 官方建议不要去调用 `await` 方法，有可能造成死锁情况；建议调用 `addListener(GenericFutureListener)` 方法，此方法有回调机制，当一个I/O操作完成时`addListener(GenericFutureListener)`会通知，而且不会阻塞。
+```text
+                                     +---------------------------+
+                                     | Completed successfully    |
+                                     +---------------------------+
+                                +---->      isDone() = true      |
++--------------------------+    |    |   isSuccess() = true      |
+|        Uncompleted       |    |    +===========================+
++--------------------------+    |    | Completed with failure    |
+|      isDone() = false    |    |    +---------------------------+
+|   isSuccess() = false    |----+---->      isDone() = true      |
+| isCancelled() = false    |    |    |       cause() = non-null  |
+|       cause() = null     |    |    +===========================+
++--------------------------+    |    | Completed by cancellation |
+                                |    +---------------------------+
+                                +---->      isDone() = true      |
+                                     | isCancelled() = true      |
+                                     +---------------------------+
+```
+#### ChannelFactory
+#### ReflectiveChannelFactory
+#### Channel
+#### ChannelPipeline
+#### NioServerSocketChannel
+* 在NioServerSocketChannel中，在获取ServerSocketChannel时没有使用 `java.nio.channels.spi.SelectorProvider#provider` 方法，而是使用了 `java.nio.channels.spi.SelectorProvider.openServerSocketChannel` 方法，
+原因是因为 `SelectorProvider#provider` 中有同步代码块，会造成性能下降，每增加5000个连接性能就会下降1%；而 `SelectorProvider.openServerSocketChannel` 没有同步代码块，每次直接生成一个新的ServerSocketChannel对象，但是会消耗内存空间
+* 在NioServerSocketChannel的构造方法中，首先确定了对于 `OP_ACCEPT` 事件感兴趣，以确保连接可以正常的接入。
+```java
+public NioServerSocketChannel(ServerSocketChannel channel) {
+        super(null, channel, SelectionKey.OP_ACCEPT);
+        config = new NioServerSocketChannelConfig(this, javaChannel().socket());
+}
+```
+#### ServerBootstrap
+* 服务端启动引导类，初始化一系列参数，为服务器启动做准备
+##### group
+这个方法有两个，一个是接受一个E
