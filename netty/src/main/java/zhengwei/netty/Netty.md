@@ -250,10 +250,10 @@ limit与position的值会在操作时被考虑到，程序会去检查其值是�
 ## Netty
 ### 组件
 #### EventLoopGroup
-事件循环组，本质就是一个线程池，最终继承自 `java.util.concurrent.ExecutorService`，并对其进行扩展，提供了获取内部的EventLoop对象的方法，
-```java
-
-```
+事件循环组，最终继承自 `java.util.concurrent.ExecutorService`，并对其进行扩展，内部包含若干个EventLoop类似于EventLoop数组(本质是EventExecutor数组)，其声明如下，并提供了获取内部的EventLoop对象的方法、注册Channel的方法，
+一般服务器端有两个EventLoopGroup，分别是bossGroup和workerGroup，bossGroup通常只接受连接，然后分配给workerGroup去处理，这其中涉及到Reactor模式。最常用的一个实现类是 `NioEventLoopGroup`
+#### EventLoop
+一个比较虚的组件，在构造NioEventLoopGroup时，其本质时EventLoop数组，并在构造方法中被初始化。
 #### NioEventLoopGroup
 Nio的事件循环组，接受一个 `int` 类型的参数，此参数的作用是在启动事件循环组时启动多少个线程，默认是CPU个数的两倍。
 这个类主要是初始化一些Netty的一些参数，最终调用的是 `protected MultithreadEventExecutorGroup(int nThreads, Executor executor, EventExecutorChooserFactory chooserFactory, Object... args)` ，即初始化了启动的线程个数、
