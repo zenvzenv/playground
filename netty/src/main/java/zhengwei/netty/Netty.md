@@ -299,6 +299,22 @@ public NioServerSocketChannel(ServerSocketChannel channel) {
 }
 ```
 #### ServerBootstrap
-* 服务端启动引导类，初始化一系列参数，为服务器启动做准备
+* 服务端启动引导类，初始化一系列参数，为启动信息做一些封装，为服务器启动做准备
 ##### group
-这个方法有两个，一个是接受一个E
+这个方法有两个重载方法，一个是接受一个EventLoopGroup参数还有一个是接受两个EventLoopGroup。
+###### group(EventLoopGroup)
+通常在客户端使用，仅仅是启动线程往服务端发送请求
+###### group(EventLoopGroup, EventLoopGroup)
+通常在服务端使用，一个是bossGroup和workGroup，bossGroup只是接受客户端发送过来的请求，接受到请求之后，交由workGroup去处理具体的业务.
+##### channel(Class<? extends C> channelClass)
+```java
+public B channel(Class<? extends C> channelClass) {
+    if (channelClass == null) {
+        throw new NullPointerException("channelClass");
+    }
+    return channelFactory(new ReflectiveChannelFactory<C>(channelClass));
+}
+```
+指定Channel的一个class对象，将会在后续利用反射创建具体的Channel对象，具体的实现类是ReflectiveChannelFactory，因为其中调用的是 `clazz.getConstructor().newInstance();` 方法生成实例对象，需要确保传入的class对象有一个无参构造器，
+否则会无法生成实例，被实例化的对象用于以后创建Channel的工厂类。
+### Reactor模式
