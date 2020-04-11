@@ -288,6 +288,71 @@ Netty中的Future继承自jdk中的Future，Netty在jdk的基础上进行了扩�
 #### ReflectiveChannelFactory
 #### Channel
 #### ChannelPipeline
+它是一个增强版的拦截过滤器，每个ChannelHandler都和一个Channel关联，每当一个Channel创建的时候一个与之关联的ChannelPipeline就会自动创建。
+它由一系列ChannelHandler组成，每个ChannelHandler处理完数据之后，都会将事件广播给下一个ChannelHandler，pipeline中由两个方向，一个是inbound和outbound
+```text
+                                                I/O Request
+                                           via {@link Channel} or
+                                       {@link ChannelHandlerContext}
+                                                     |
+ +---------------------------------------------------+---------------+
+ |                           ChannelPipeline         |               |
+ |                                                  \|/              |
+ |    +---------------------+            +-----------+----------+    |
+ |    | Inbound Handler  N  |            | Outbound Handler  1  |    |
+ |    +----------+----------+            +-----------+----------+    |
+ |              /|\                                  |               |
+ |               |                                  \|/              |
+ |    +----------+----------+            +-----------+----------+    |
+ |    | Inbound Handler N-1 |            | Outbound Handler  2  |    |
+ |    +----------+----------+            +-----------+----------+    |
+ |              /|\                                  .               |
+ |               .                                   .               |
+ | ChannelHandlerContext.fireIN_EVT() ChannelHandlerContext.OUT_EVT()|
+ |        [ method call]                       [method call]         |
+ |               .                                   .               |
+ |               .                                  \|/              |
+ |    +----------+----------+            +-----------+----------+    |
+ |    | Inbound Handler  2  |            | Outbound Handler M-1 |    |
+ |    +----------+----------+            +-----------+----------+    |
+ |              /|\                                  |               |
+ |               |                                  \|/              |
+ |    +----------+----------+            +-----------+----------+    |
+ |    | Inbound Handler  1  |            | Outbound Handler  M  |    |
+ |    +----------+----------+            +-----------+----------+    |
+ |              /|\                                  |               |
+ +---------------+-----------------------------------+---------------+
+                 |                                  \|/
+ +---------------+-----------------------------------+---------------+
+ |               |                                   |               |
+ |       [ Socket.read() ]                    [ Socket.write() ]     |
+ |                                                                   |
+ |  Netty Internal I/O Threads (Transport Implementation)            |
+ +-------------------------------------------------------------------+
+```
+##### inbound
+inbound的方向是从系统外部进入到系统内部的，即 `SocketChannel#read(ByteBuffer)` 读入客户端的数据进入系统内部，经过每一层ChannelHandler处理，最终到最后一个ChannelHandler处理完毕。  
+那么哪些处理器是inbound方向上的处理器呢？  
+即是那些实现了ChannelInboundHandler的处理器类是会被Netty认为是inbound上的处理器，在事件从外部进入时，事件就会被这些Handler处理。
+##### outbound
+outbound的方向是从系统内部出去到系统外部去，即 `SocketChannel#write(ByteBuffer)` ，与inbound的方向完全相反，最终处理完的数据输出给客户端。  
+那么哪些处理器时outbound方向上的处理器呢？  
+即是那些实现了ChannelOutboundHandler的处理器类是会被Netty认为是outbound上的处理器，在事件从内部出去到外部时，事件就会被这些Handler处理。
+##### Netty对于inbound和outbound方向上handler的选择
+例如有如下代码：
+```java
+ChannelPipeline p = ...
+p.addLast("1", new InboundHandlerA());
+p.addLast("2", new InboundHandlerB());
+p.addLast("3", new OutboundHandlerA());
+p.addLast("4", new OutboundHandlerB());
+p.addLast("5", new InboundOutboundHandlerX());
+```
+以Inbound打头的类代表是inbound方向的处理器，以Outbound打头的类代表是outbound方向的处理器。  
+例子里面给了1,2,3,4,5这五个处理器，inbound方向的处理顺序就是1->2->3->4->5，那outbound的方向的处理顺序就是5->4->3->2->1，但是原则上，ChannelPipeline会跳过一些处理器，那是因为：
+* 3和4没有实现 `ChannelInboundHandler` 所以在inbound方向上最终的处理顺序是1->2->5
+* 1和2没有实现 `ChannelOutboundHandler` 所以在outbound方向上最终的处理顺序是5->4->3
+* 而5即实现了 `ChannelInboundHandler` 又实现了 `ChannelOutboundHandler` 所以不论是inbound还是outbound都会经过处理器5的处，即1->2->5和5->4->3
 #### NioServerSocketChannel
 * 在NioServerSocketChannel中，在获取ServerSocketChannel时没有使用 `java.nio.channels.spi.SelectorProvider#provider` 方法，而是使用了 `java.nio.channels.spi.SelectorProvider.openServerSocketChannel` 方法，
 原因是因为 `SelectorProvider#provider` 中有同步代码块，会造成性能下降，每增加5000个连接性能就会下降1%；而 `SelectorProvider.openServerSocketChannel` 没有同步代码块，每次直接生成一个新的ServerSocketChannel对象，但是会消耗内存空间
@@ -317,4 +382,8 @@ public B channel(Class<? extends C> channelClass) {
 ```
 指定Channel的一个class对象，将会在后续利用反射创建具体的Channel对象，具体的实现类是ReflectiveChannelFactory，因为其中调用的是 `clazz.getConstructor().newInstance();` 方法生成实例对象，需要确保传入的class对象有一个无参构造器，
 否则会无法生成实例，被实例化的对象用于以后创建Channel的工厂类。
-### Reactor模式
+### Netty中的Reactor模式
+Reactor模型大致可以分成两个模块，一个是boss和worker。其boss和worker内部工作原理和jdk的NIO原理类似，boss和worker内部分别维护一个selector用于监听事件的发生，而boss主要负责监听 `OP_ACCEPT` 事件的产生，然后得到一系列的SelectionKeys，
+然后交由worker去处理具体的事件IO操作。
+#### boss
+boss实际是不干事的，只是接受请求即accept，一旦有客户端连接上了服务器，那么accept则会返回一系列SelectionKeys，然后遍历SelectionKeys从中获得每个SelectionKey所对应的那个SocketChannel.
