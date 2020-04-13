@@ -285,8 +285,11 @@ Netty中的Future继承自jdk中的Future，Netty在jdk的基础上进行了扩�
                                      +---------------------------+
 ```
 #### ChannelFactory
+顾名思义，是创建Channel的工厂类，其主要功能就是创建Channel，通常是通过反射创建Channel
 #### ReflectiveChannelFactory
+专门反射创建Channel，提供的class对象需要提供无参构造器，最常用的是NioServerSocketChannel.class这个对象
 #### Channel
+
 #### ChannelPipeline
 它是一个增强版的拦截过滤器，每个ChannelHandler都和一个Channel关联，每当一个Channel创建的时候一个与之关联的ChannelPipeline就会自动创建。
 它由一系列ChannelHandler组成，每个ChannelHandler处理完数据之后，都会将事件广播给下一个ChannelHandler，pipeline中由两个方向，一个是inbound和outbound
@@ -382,6 +385,45 @@ public B channel(Class<? extends C> channelClass) {
 ```
 指定Channel的一个class对象，将会在后续利用反射创建具体的Channel对象，具体的实现类是ReflectiveChannelFactory，因为其中调用的是 `clazz.getConstructor().newInstance();` 方法生成实例对象，需要确保传入的class对象有一个无参构造器，
 否则会无法生成实例，被实例化的对象用于以后创建Channel的工厂类。
+##### bind(int)
+这个方法实际去启动服务器，最终调用的是 `private ChannelFuture doBind(final SocketAddress localAddress)` 代码如下：
+```java
+private ChannelFuture doBind(final SocketAddress localAddress) {
+    //
+    final ChannelFuture regFuture = initAndRegister();
+    final Channel channel = regFuture.channel();
+    if (regFuture.cause() != null) {
+        return regFuture;
+    }
+    if (regFuture.isDone()) {
+        // At this point we know that the registration was complete and successful.
+        ChannelPromise promise = channel.newPromise();
+        doBind0(regFuture, channel, localAddress, promise);
+        return promise;
+    } else {
+        // Registration future is almost always fulfilled already, but just in case it's not.
+        final PendingRegistrationPromise promise = new PendingRegistrationPromise(channel);
+        regFuture.addListener(new ChannelFutureListener() {
+            @Override
+            public void operationComplete(ChannelFuture future) throws Exception {
+                Throwable cause = future.cause();
+                if (cause != null) {
+                    // Registration on the EventLoop failed so fail the ChannelPromise directly to not cause an
+                    // IllegalStateException once we try to access the EventLoop of the Channel.
+                    promise.setFailure(cause);
+                } else {
+                    // Registration was successful, so set the correct executor to use.
+                    // See https://github.com/netty/netty/issues/2586
+                    promise.registered();
+
+                    doBind0(regFuture, channel, localAddress, promise);
+                }
+            }
+        });
+        return promise;
+    }
+}
+```
 ### Netty中的Reactor模式
 Reactor模型大致可以分成两个模块，一个是boss和worker。其boss和worker内部工作原理和jdk的NIO原理类似，boss和worker内部分别维护一个selector用于监听事件的发生，而boss主要负责监听 `OP_ACCEPT` 事件的产生，然后得到一系列的SelectionKeys，
 然后交由worker去处理具体的事件IO操作。
