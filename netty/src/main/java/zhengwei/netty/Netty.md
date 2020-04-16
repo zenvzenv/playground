@@ -424,8 +424,16 @@ private ChannelFuture doBind(final SocketAddress localAddress) {
     }
 }
 ```
-### Netty中的Reactor模式
-Reactor模型大致可以分成两个模块，一个是boss和worker。其boss和worker内部工作原理和jdk的NIO原理类似，boss和worker内部分别维护一个selector用于监听事件的发生，而boss主要负责监听 `OP_ACCEPT` 事件的产生，然后得到一系列的SelectionKeys，
-然后交由worker去处理具体的事件IO操作。
-#### boss
-boss实际是不干事的，只是接受请求即accept，一旦有客户端连接上了服务器，那么accept则会返回一系列SelectionKeys，然后遍历SelectionKeys从中获得每个SelectionKey所对应的那个SocketChannel.
+### Reactor模式
+Reactor模式可以分为5个组成部分，如下图所示  
+![reactor_model]()
+#### Handle(句柄或文件描述符)
+本质上表示一种资源即文件描述符，由操作系统提供，该资源表示一个一个事件，比如Linux中的文件描述符或每一个Socket连接都会产生一个文件描述符。事件既可以来自外部也可以来自内部；
+外部事件有客户端连接请求或客户端发送的数据等；内部事件有操作系统定时器事件等，Handle是事件的发源地。
+#### Synchronous Event Demultiplexer(同步事件多路复用器)
+本身是系统调用，用于等待事件的发送(事件可能是一个也可能是多个)。调用方会在调用它的时候被阻塞，直到事件分离器上产生事件为止。
+对于Linux来说，同步事件多路复用器指的是I/O的多路复用，比如说select,poll,epoll等系统调用。
+在Java NIO的领域中，同步事件多路复用器对用的就是Selector，对应的方法就是select()方法。
+#### Event Handler(事件处理器)
+由多个回调方法组成，这些回调方法构成了与应用相关的某个特定的事件的反馈机制。
+Java NIO中不存在Event Handler，但是Netty弥补了这一个缺陷，Netty中提供了大量的回调方法(比如SimpleChannelInboundHandler中提供的方法)，供我们在特定事件产生时实现响应的回调方法来处理业务逻辑。
