@@ -1,0 +1,8 @@
+# SparkBroadcast
+Broadcast就是将数据从一个节点发送到其他节点上去。
+## Spark中的Broadcast为什么是只读的？
+这涉及到各节点之间的数据一直性问题，如果Broadcast在一个节点上被更新了，那其他节点的数据是否也要一起更新？如果每个节点都去更新，那么更新的顺序是什么？如果一台节点更新失败怎么办？等诸多问题，
+Spark在考虑到一致性问题，目前Spark只支持只读Broadcast。
+## 为什么Broadcast只到节点而不是到Task？
+因为每个task都是一个thread，每个task都是运行在Executor中的，Executor中的内存主要由Storage和Execution组成，只要将Broadcast数据存储到Storage内存中就能被所有task访问到。
+## 怎么使用Broadcast
