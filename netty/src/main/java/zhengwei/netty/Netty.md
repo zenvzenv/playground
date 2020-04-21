@@ -444,3 +444,8 @@ Reactor模式可以分为5个组成部分，如下图所示
 #### Event Handler(事件处理器)
 由多个回调方法组成，这些回调方法构成了与应用相关的某个特定的事件的反馈机制。
 Java NIO中不存在Event Handler，但是Netty弥补了这一个缺陷，Netty中提供了大量的回调方法(比如SimpleChannelInboundHandler中提供的方法)，供我们在特定事件产生时实现响应的回调方法来处理业务逻辑。
+### Concrete Event Handler(具体事件处理器)
+是事件处理器的实现。本身实现了事件处理器的各个回调方法，从而实现了特定业务的逻辑。本质上是我们编写的一个个的Handler
+### Initiation Dispatcher(初始分发器)
+实际上是Reactor角色。本身定义了一些规范，这些规范用于控制事件的调度方式，同时提供了应用进行事件的注册、删除等操作。Initiation Dispatcher会通过Synchronous Event Demultiplexer来等待事件的发生(即select方法得到返回)。
+一但有事件发生，Initiation Dispatcher会分离出每一个事件(即遍历select中得到的每一个事件)，然后调用事件处理器，最后调用回调方法来处理这些事件
