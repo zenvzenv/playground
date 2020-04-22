@@ -1055,7 +1055,7 @@ Parallel Scavenge收集器也是一个多线程收集器，也是使用复制算
 以便降低内存回收次数从而获得更好的性能。要是CMS运行期间预留的内存无法满足程序需要时，虚拟机将启动预备方案：临时启动Serial Old收集器进行老年代垃圾收集，这样会加长停顿时间
 * 因为采用的是标记-清理算法，那么在收集结束后将出现大量的内存碎片，内存碎片越多，会给大对象分配内存带来很大麻烦，往往出现在老年代还有很大内存空间剩余，但无法找到足够大的连续的内存空间来分配当前对象，不得不提前进行一个full gc。
 CMS收集器提供 `-XX:UseCMSCompactAtFullCollaction` 开关参数(默认开启)，用于在CMS收集器顶不住要进行full gc时开启内存整理工作，内存整理无法并发，内存碎片问题没有了，停顿是将将会边长。
-#### G1(Garbage First Collector)
+#### G1(Garbage First Collector)(young,old)
 ##### 吞吐量
 吞吐量关注的是，在一个指定的时间内，最大化一个应用的工作量
 1. 如何判断一个系统的吞吐量？
@@ -1095,6 +1095,80 @@ CMS收集器提供 `-XX:UseCMSCompactAtFullCollaction` 开关参数(默认开启
     * G1 GC是在points-out的card table之上再加了一层结构来构成points-into RSet：每个region都会记录下到底哪些别的region有指向自己的指针，而这些指针分别在哪些card范围内。
     * 这个RSet其实一个hash table，key是别的region的起始地址，value是一个集合，里面的元素是card table的index。e.g.如果regionA的RSet有一项的key是regionB，value里面有index为1234的card，他的意思就是regionB的一个card里有指向regionA。所以对于regionA来说，该RSet记录的是points-into的关系；而card table任然记录了points-out的关系。
 * snapshot-at-the-beginning(SATB)：是G1在并发标记阶段使用的增量式标记算法。并发标记是并发多线程的，但并发线程在同一时刻只扫描一个区域
+* Humongous区域：如果一个对象占据的空间超过一个region的50%以上，G1认为这是一个巨型区域，**默认会将其直接分配到老年代**，但如果它是一个短期存在的一个巨型对象的话，就会对垃圾收集器产生负面影响。为了解决这一现象，G1划分humongous区域专门用来存储大对象。如果一个humongous存不下一个大对象，那么G1将会寻找连续的H区来存储。**为了能够找到足够大的连续的H区，有时将不得不启动一次full gc**
+##### G1相比于CMS的优势
+* 因为G1将内存分成大小相等的区域(region)并采用复制算法，所以不产生内存碎片；而CMS采用的是标记清理算法，必然会产生内存碎片，只有在STW时才会整理内存
+* Eden、Survivor和Old的大小不在固定，是可以动态变化的，提高了内存的使用率；而CMS采用固定大小的分代大小
+* G1可以通过设置预期停顿时间(pause time)来控制垃圾收集时间，G1会参考预期停顿时间来收集部分region，而不是去回收整个堆；其他的垃圾收集器则会收集整个内存区域
+* G1可以在新生代和老年代使用，而CMS只可以在老年去使用
+##### G1适用的场景
+* 服务器多核CPU、JVM较大内存的应用
+* 应用在运行时产生大量内存碎片，需要经常压缩空间
+* 想要更加可控的、可预期的GC停顿周期；防止高并发下的应用雪崩现象
+##### G1的垃圾收集模式
+G1提供两种收集模式，young gc和mixed gc，两种都需要STW(Stop The World)
+* young gc：选定**所有新生代**region，通过控制新生代的region的个数，即回收的新生代的内存来控制young gc的时间开销
+    1. 根扫描：静态和本地对象被扫描
+    2. 更新RSet：处理dirty card队列更新RSet
+    3. 处理RSet：检测从年轻代指向老年代的对象
+    4. 对象拷贝：拷贝存活对象到survivor/old区域
+    5. 处理引用队列：软引用、弱引用和虚引用
+* mixed gc：选定**所有新生代**region，外加根据global concurrent marking统计得出收集收益高的若干来年代region，在用户指定的开销范围内尽可能的选择收集收益较高的region。
+    * mixed gc不是full gc，**它只回收部分老年代region**，如果mixed gc实在无法跟上程序分配内存的速度，导致老年代被填满而无法继续进行mixed gc，就会使用serial old gc来进行full gc收集整个heap，本质上，G1不提供full gc
+    1. 全局并发标记(global concurrent marking)
+    2. 拷贝存活对象(evacuation)
+##### global concurrent marking
+全局并发标记，执行过程类似于CMS，但不同的是，在G1 GC中，它**主要为mixed gc提供标记服务**，并不是一次gc的必要环节，主要有一下四个步骤：  
+    1. 初始标记(initial mark,STW)：从GC Roots开始标记
+    2. 并发标记(concurrent mark)：这个阶段从GC Roots开始堆heap中的对象进行标记，标记线程与业务线程并发执行，并且收集各个region中存活的对象
+    3. 重新标记(remark,STW)：标记那些在并发标记阶段引用发生变化的对象
+    4. 清理(cleanup)：采用复制算法，将存活对象复制到另一个region中并清空region，加入free list
+* 第一阶段initial mark是共用了young gc的暂停，这是因为他们可以复用root scan操作，所以可以说是global concurrent marking伴随着young gc而发生
+* 第四阶段只是回收了没有存活的对象的region，因此不需要STW
+##### G1运行的主要模式
+* YGC：在Eden区充满时触发，在回收之后，所有之前属于Eden的region将全部变成空白，即不属于任何一个分区(eden,survivor,old)，需要STW
+    1. 触发时机：Eden区满了
+    2. Eden区的数据被移动到Survivor区，如果Survivor区的空间不够，Eden区的部分数据将直接晋升到老年代
+    3. Survivor区数据移动到新的Survivor区也有部分数据晋升到老年代的可能，**但最终Eden区是空的**
+    4. G1 YGC期间STW，YGC结束之后，业务线程继续工作
+* 并发阶段
+* 混合模式(mixed)：
+    * G1HeapWastePercent：在global concurrent marking标记结束之后，我们可以知道old generation region中有多少空间需要被回收，在每次young gc之后和再次发生mixed gc之前，会检查垃圾占比是否到达此参数，只有到达之后才会发生mixed gc
+    * G1MixedGCLiveThresholdPercent：old generation region中的存活对象占比，只有在此参数之下，才会被选入到CSet中
+    * G1MixedGCCountTarget：一次global concurrent marking之后，最多执行mixed gc的次数
+    * G1OldSetRegionThresholdPercent：一次mixed gc中能被选入到CSet的最多old generation region的数量
+* full gc(一般G1出现问题时发生)
+##### G1运行参数介绍
+* -XX:G1HeapRegion=x：设置region大小，并非最终值
+* -XX:MaxGCPauseMillis：设置G1收集过程中的停顿时间，默认值200ms，这是个近似值
+* -XX:G1NewSizePercent：新生代最小值，默认5%
+* -XX:G1MaxNewSizePercent：新生代最大值，默认60%
+* -XX:ParallelGCThreads：STW期间，并行的收集器线程数量
+* -XX:ConcGCThreads=x：并发标记阶段，并行的线程数
+* -XX:InitialHeapOccupancyPercent：设置触发标记周期的Java堆占用率，默认45%。这里的Java堆占比指的是non_young_capacity_bytes，包括old+humongous
+##### 三色标记算法
+从GC Roots出发遍历heap。针对可达对象先标记white为gray，然后标记gary为black，遍历完所有可达对象之后，可达对象都变为black，所有不可达对象全部为white即可以回收
+* 黑色：根对象，或者该对象与它的子对象都扫描过了(对象被标记，且它的所有field(引用其他对象)都被标记完毕)
+* 灰色：对象本身被扫描，但还没扫描完该对象中的子对象(它的field还没有被标记完)，正在标记的对象
+* 白色：还没有被扫描的对象或不可达对象，垃圾对象
+##### SATB(snapshot-at-the-beginning)
+1. 在开始标记的时候生成一个快照，标记存活对象
+2. 在并发标记的时候将所有被改变的对象入队(在write barrier里把所有旧的引用所指向的对象都变成非白)，write barrier就是对引用赋值做了额外的处理，通过write barrier就可以了解到哪些对象发生了改变
+3. 可能存在浮动垃圾，将在下次进行收集
+4. 如何找到GC过程中分配的对象？每个region都记录着两个top-at-mark-start(TAMS)指针，分别为preTAMS和nextTAMS指针，在TAMS以上的对象是新分配的，因而被视为隐式mark
+5. 通过这种方式我们就找到了GC过程中新分配的对象，并认为这些对象都是存活的对象
+6. 对于三色标记算法在global concurrent marking时可能产生漏标情况，漏标情况会出现在一下的情况中：
+    * 并发标记时，应用线程给一个黑色对象的引用类型字段赋值白色引用：post-write-barrier来记录新增的引用关系，然后根据这些引用关系为根重新扫描一遍
+    * 并发标记时，引用线程删除所有灰色对象到白色对象的引用：pre-write-barrier来记录所有被删除的引用关系，最后以旧引用关系重新扫描一遍
+##### G1的最佳实践
+* 不断的调优暂停时间：
+    * 通过-XX:MaxGCPauseMillis=x可以设置启动应用程序暂停的时间，G1会根据这个值来调整CSet的大小
+    * 一般情况下，这个值可以设置到100ms到200ms，需要注意的是暂停时间并不是越小越好，越小会导致CSet变小，导致每次收集的垃圾变少了，滞留在JVM中的垃圾变多，导致JVM没有足够的内存去容纳新的对象，最终退化成full gc(serial gc)
+* 不要设置新生代和老年代的大小：
+    * G1在运行时自动调整新生代和老年代的大小。通过改变代的大小调整对象的晋升速度以及晋升年龄，从而达到我们为收集器设置的暂停时间
+    * 我们自己设置新生代和老年代的大小就意味着放弃了G1的自动调优，我们只需要设置堆的大小，剩下的交给G1自己去分配就行
+* 关注Evacuation Failure
+    * Evacuation Failure类似于CMS的里面的晋升失败，堆空间的垃圾太多导致无法完成region之间的拷贝，于是不得不退化成full gc来坐一起全局范围的垃圾收集
 ### Java内存泄露的经典原因
 1. 对象定义在错误的范围(wrong scope)
 2. 异常(Exception)处理不当
@@ -1134,7 +1208,7 @@ CMS收集器提供 `-XX:UseCMSCompactAtFullCollaction` 开关参数(默认开启
 * -XX:+UseSerialGC：使用串行垃圾收集器，新生代使用Serial GC，老年代使用Serial Old GC
 * -XX:+UseConcMarkSweepGC：指定老年代使用CMS垃圾收集器，需要再指定一个新生代垃圾收集器
 * -XX:+UseParNewGC：指定新生代使用ParNew GC，并行垃圾收集器
-
+* -XX:+UseG1GC：指定使用G1垃圾收集器
 ### 注意点
 1. 对于 `System.gc()` 的理解
 System.gc()是告诉JVM接下来进行一次Full GC，但是具体什么时候去执行，最终由JVM自己决定，它的主要作用就是在没有对象创建的时候，去进行一次GC，因为平时触发GC是在对象创建时导致内存空间不足才会触发
