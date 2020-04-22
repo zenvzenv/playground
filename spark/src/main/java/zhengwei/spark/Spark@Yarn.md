@@ -61,7 +61,7 @@ SPARK_OPTS="--master yarn \
  --num-executors 3 \
  --executor-cores 7 \
  --driver-memory 2g \
- --queue root.spark_queue
+ --queue root.spark_queue"
 ```
 该命令中，我们申请了3个executor，每个executor申请20G和3个核心。  
 按照预期，我们申请的总container的个数为3个，总memory为60G，总core为31个。  
@@ -72,3 +72,14 @@ SPARK_OPTS="--master yarn \
 这样container和core的个数就能够对上了，但是内存还是会对不上，这样算的话，总内存应该是61G，但是页面显示有67G，多出来了6G内存。
 这6G内存是因为，Spark在为Executor申请内存的时候，为在 `--executor-memory` 的基础上再额外申请 `spark.yarn.executor.memoryOverhead` 的内存，即 `max(20G * 0.1 * 1024, 384M) = 2G`，
 所以Executor申请了22G内存，即3个executor申请了66G内存，再加1G的ApplicationMaster的内存，正好是67G内存。  
+```bash
+SPARK_OPTS="--master yarn \
+ --deploy-mode cluster \
+ --executor-memory 20G \
+ --num-executors 3 \
+ --executor-cores 7 \
+ --driver-memory 2g \
+ --queue root.spark_queue \
+ --driver-memory=6G"
+```
+如果是cluster模式提交的话那么ApplicationMaster申请的内存将由 `--driver-memory` 来指定，总内存数是 `3 * 22G + 1 * driver-memory`
