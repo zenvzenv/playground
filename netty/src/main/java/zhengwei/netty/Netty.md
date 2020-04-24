@@ -433,7 +433,7 @@ private ChannelFuture doBind(final SocketAddress localAddress) {
 ```
 ### Reactor模式
 Reactor模式可以分为5个组成部分，如下图所示  
-![reactor_model]()
+![reactor_model](https://github.com/zw030301/playground/blob/master/netty/src/main/resources/image/reactor_model.png)
 #### Handle(句柄或文件描述符)
 本质上表示一种资源即文件描述符，由操作系统提供，该资源表示一个一个事件，比如Linux中的文件描述符或每一个Socket连接都会产生一个文件描述符。事件既可以来自外部也可以来自内部；
 外部事件有客户端连接请求或客户端发送的数据等；内部事件有操作系统定时器事件等，Handle是事件的发源地。
