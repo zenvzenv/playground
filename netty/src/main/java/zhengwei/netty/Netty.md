@@ -375,6 +375,7 @@ public NioServerSocketChannel(ServerSocketChannel channel) {
 ```
 #### ServerBootstrap
 * 服务端启动引导类，初始化一系列参数，为启动信息做一些封装，为服务器启动做准备
+##### 
 ##### group
 这个方法有两个重载方法，一个是接受一个EventLoopGroup参数还有一个是接受两个EventLoopGroup。
 ###### group(EventLoopGroup)
@@ -449,3 +450,15 @@ Java NIO中不存在Event Handler，但是Netty弥补了这一个缺陷，Netty�
 ### Initiation Dispatcher(初始分发器)
 实际上是Reactor角色。本身定义了一些规范，这些规范用于控制事件的调度方式，同时提供了应用进行事件的注册、删除等操作。Initiation Dispatcher会通过Synchronous Event Demultiplexer来等待事件的发生(即select方法得到返回)。
 一但有事件发生，Initiation Dispatcher会分离出每一个事件(即遍历select中得到的每一个事件)，然后调用事件处理器，最后调用回调方法来处理这些事件
+### Reactor模式的流程
+1. 当应用想Initiation Dispatcher注册具体的Event Handler时，应用会标识出该Event Handler希望Initiation Dispatcher
+在未来的某个事件发生时向Event Handler发送通知，事件与Handler是相关联的。对应于Netty中是将自己写的Handler加入到pipeline中。
+2. Initiation Dispatcher会要求每个Event Handler向Initiation Dispatcher传递内部的Handle，该Handle向OS标识Event Handler
+3. 当所有事件处理完毕之后，应用会调用Initiation Dispatcher内部的 `handle_events` 方法来启动Initiation Dispatcher的事件循环
+(对应到Netty中的就是启动bossGroup和workerGroup)。这时，Initiation Dispatcher会将所有的Event Handler的Handle合并起来(放到集合中)，
+并使用Synchronous Event Demultiplexer等待这些事件的发生。比如说：TCP协议层会使用select来等待客户端发送过来的数据到达socket handle上。
+4. 当某个事件的Handle变为ready时(TCP的socket变为等待读状态)，Synchronous Event Demulitiplexer会通知Initiation Dispatcher
+5. Initiation Dispatcher会触发Event Handler的回调方法，从而响应这个处于ready状态的Handle。当事件发生时，Initiation Dispatcher
+会将Handle作为key来寻找和分发到恰当的Event Handler上的回调方法去处理
+6. Initation Dispatcher会回调Event Handler中的 `handle_event(type)` 回调方法来执行特定于业务的代码(开发者自行编写的代码),
+从而响应这个Handle。所发生的Handle类型可以作为 `handle_event(type)` 参数并被该方法内部使用来执行额外的特定与服务的分离与分发
