@@ -296,9 +296,13 @@ Netty中的Future继承自jdk中的Future，Netty在jdk的基础上进行了扩�
 #### ReflectiveChannelFactory
 专门反射创建Channel，提供的class对象需要提供无参构造器，最常用的是NioServerSocketChannel.class这个对象
 #### Channel
-
+具体定义参见Channel的javadoc `io.netty.channel.Channel`  
+常用的Channel为NioServerSocketChannel，NioServerSocketChannel的构造方法中会去初始化感兴趣的 `OP_ACCEPT` 时间和初始与之关联的 `ChannelPipeline`，
+这个Pipeline的具体类型是 `DefaultChannelPipeline`
 #### ChannelPipeline
-它是一个增强版的拦截过滤器，每个ChannelHandler都和一个Channel关联，每当一个Channel创建的时候一个与之关联的ChannelPipeline就会自动创建。
+一个普通的拦截过滤器的实现是：拦截过滤器既会处理外部进入到系统内部的请求，也会处理从系统内部出去的请求，不过这两个方向的请求处理所经过的处理流程是相反的。
+而ChannelPipeline是一个增强版的拦截过滤器，它并不是对请求进行两套相反的处理流程，它只对请求进行必要的处理，例如进站的事件只进行inbound的梳理，
+出站的事件只进行outbound处理，每个ChannelHandler都和一个Channel关联，每当一个Channel创建的时候一个与之关联的ChannelPipeline就会自动创建。
 它由一系列ChannelHandler组成，每个ChannelHandler处理完数据之后，都会将事件广播给下一个ChannelHandler，pipeline中由两个方向，一个是inbound和outbound
 ```text
                                                 I/O Request
@@ -363,6 +367,26 @@ p.addLast("5", new InboundOutboundHandlerX());
 * 3和4没有实现 `ChannelInboundHandler` 所以在inbound方向上最终的处理顺序是1->2->5
 * 1和2没有实现 `ChannelOutboundHandler` 所以在outbound方向上最终的处理顺序是5->4->3
 * 而5即实现了 `ChannelInboundHandler` 又实现了 `ChannelOutboundHandler` 所以不论是inbound还是outbound都会经过处理器5的处，即1->2->5和5->4->3
+##### 关于I/O线程和业务线程的分离
+一个ChannelPipeline中往往有若干个ChannelHandler去响应I/O事件和I/O操作(比如：写数据活关闭操作)，管道中处理事件的时候，处理时间会根据
+业务的复杂程度而不同，如果业务很复杂，需要处理的时间会很长，如果这时业务线程在IO线程中进行处理，那么Netty就会被阻塞住，降低整个系统的效率，
+ChannelPipeline中提供一个方法 `ChannelPipeline addLast(EventExecutorGroup group, String name, ChannelHandler handler);` ，
+将业务与IO隔离开来执行，从而提高效率。
+```java
+ChannelPipeline pipline = ch.pipeline();
+pipeline.addList("decoder", new MyProtocolDecoder());
+pipeline.addList("encoder", new MyProtocolEncoder());
+static final EventExecutorGroup group = new DefaultEventExecutorGroup(16);//事件执行组，线程池
+// Tell the pipeline to run MyBusinessLogicHandler's event handler methods
+// in a different thread than an I/O thread so that the I/O thread is not blocked by
+// a time-consuming task.
+// If your business logic is fully asynchronous or finished very quickly, you don't
+// need to specify a group.
+pipeline.addLast(group, "handler", new MyBusinessLogicHandler());
+```
+##### 关于线程安全
+ChannelPipeline是线程安全的，因此ChannelHandler可以在任意时刻进行添加和移除，例如：你可以添加一个加密的处理器当你在传输加密数据时，
+在传输完成时，你也可以将加密的处理器移除，这不会有其他影响
 #### NioServerSocketChannel
 * 在NioServerSocketChannel中，在获取ServerSocketChannel时没有使用 `java.nio.channels.spi.SelectorProvider#provider` 方法，而是使用了 `java.nio.channels.spi.SelectorProvider.openServerSocketChannel` 方法，
 原因是因为 `SelectorProvider#provider` 中有同步代码块，会造成性能下降，每增加5000个连接性能就会下降1%；而 `SelectorProvider.openServerSocketChannel` 没有同步代码块，每次直接生成一个新的ServerSocketChannel对象，但是会消耗内存空间
@@ -375,7 +399,35 @@ public NioServerSocketChannel(ServerSocketChannel channel) {
 ```
 #### ServerBootstrap
 * 服务端启动引导类，初始化一系列参数，为启动信息做一些封装，为服务器启动做准备
-##### 
+##### ServerBootstrapAcceptor
+是ServerBootstrap中的一个内部类，是bossGroup和workerGroup通过此组件建立联系，每当bossGroup接受到一个OP_ACCEPT请求时，就会通过ServerBootstrap
+来将任务的分发给workerGroup，它的构造方法如下：
+```java
+ServerBootstrapAcceptor(
+        final Channel channel, EventLoopGroup childGroup, ChannelHandler childHandler,
+        Entry<ChannelOption<?>, Object>[] childOptions, Entry<AttributeKey<?>, Object>[] childAttrs) {
+    //将workerGroup设置进来
+    this.childGroup = childGroup;
+    //设置workerGroup的处理器，由childHandler()来指定
+    this.childHandler = childHandler;
+    //workerGroup的配置信息
+    this.childOptions = childOptions;
+    //workerGroup的属性
+    this.childAttrs = childAttrs;
+    // Task which is scheduled to re-enable auto-read.
+    // It's important to create this Runnable before we try to submit it as otherwise the URLClassLoader may
+    // not be able to load the class because of the file limit it already reached.
+    //
+    // See https://github.com/netty/netty/issues/1328
+    enableAutoReadTask = new Runnable() {
+        @Override
+        public void run() {
+            channel.config().setAutoRead(true);
+        }
+    };
+}
+```
+每当Netty的服务端创建了一个通道时，都会在该通道中的pipeline的最后添加一个ServerBootstrapAcceptor来监听客户端发送的OP_ACCEPT的请求进行分发。
 ##### group
 这个方法有两个重载方法，一个是接受一个EventLoopGroup参数还有一个是接受两个EventLoopGroup。
 ###### group(EventLoopGroup)
@@ -445,12 +497,12 @@ Reactor模式可以分为5个组成部分，如下图所示
 #### Event Handler(事件处理器)
 由多个回调方法组成，这些回调方法构成了与应用相关的某个特定的事件的反馈机制。
 Java NIO中不存在Event Handler，但是Netty弥补了这一个缺陷，Netty中提供了大量的回调方法(比如SimpleChannelInboundHandler中提供的方法)，供我们在特定事件产生时实现响应的回调方法来处理业务逻辑。
-### Concrete Event Handler(具体事件处理器)
+#### Concrete Event Handler(具体事件处理器)
 是事件处理器的实现。本身实现了事件处理器的各个回调方法，从而实现了特定业务的逻辑。本质上是我们编写的一个个的Handler
-### Initiation Dispatcher(初始分发器)
+#### Initiation Dispatcher(初始分发器)
 实际上是Reactor角色。本身定义了一些规范，这些规范用于控制事件的调度方式，同时提供了应用进行事件的注册、删除等操作。Initiation Dispatcher会通过Synchronous Event Demultiplexer来等待事件的发生(即select方法得到返回)。
 一但有事件发生，Initiation Dispatcher会分离出每一个事件(即遍历select中得到的每一个事件)，然后调用事件处理器，最后调用回调方法来处理这些事件
-### Reactor模式的流程
+#### Reactor模式的流程
 1. 当应用想Initiation Dispatcher注册具体的Event Handler时，应用会标识出该Event Handler希望Initiation Dispatcher
 在未来的某个事件发生时向Event Handler发送通知，事件与Handler是相关联的。对应于Netty中是将自己写的Handler加入到pipeline中。
 2. Initiation Dispatcher会要求每个Event Handler向Initiation Dispatcher传递内部的Handle，该Handle向OS标识Event Handler
@@ -462,3 +514,7 @@ Java NIO中不存在Event Handler，但是Netty弥补了这一个缺陷，Netty�
 会将Handle作为key来寻找和分发到恰当的Event Handler上的回调方法去处理
 6. Initation Dispatcher会回调Event Handler中的 `handle_event(type)` 回调方法来执行特定于业务的代码(开发者自行编写的代码),
 从而响应这个Handle。所发生的Handle类型可以作为 `handle_event(type)` 参数并被该方法内部使用来执行额外的特定与服务的分离与分发
+### Channel与ChannelPipeline的关系
+Channel与ChannelPipeline是相互包含的关系。在Channel中持有对ChannelPipeline的引用，在ChannelPipeline中也持有Channel的引用。
+并且在初始化Channel的时候就初始化了ChannelPipeline，初始化调用过程:
+`NioServerSocketChannel -> ReflectiveChannelFactory#newChannel() -> NioServerSocketChannel(java.nio.channels.ServerSocketChannel) -> AbstractNioChannel(Channel, SelectableChannel, int) -> AbstractChannel(io.netty.channel.Channel)`

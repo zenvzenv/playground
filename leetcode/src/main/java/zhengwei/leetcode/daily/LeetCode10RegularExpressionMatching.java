@@ -1,4 +1,4 @@
-package zhengwei.LeetCode.Daily;
+package zhengwei.leetcode.daily;
 
 /**
  * Given an input string (s) and a pattern (p), implement regular expression matching with support for '.' and '*'.
