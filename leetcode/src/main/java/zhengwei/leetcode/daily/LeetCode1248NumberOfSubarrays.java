@@ -1,4 +1,4 @@
-package zhengwei.LeetCode.Daily;
+package zhengwei.leetcode.daily;
 
 /**
  * LeetCode第1248题：统计最美子数据</p>

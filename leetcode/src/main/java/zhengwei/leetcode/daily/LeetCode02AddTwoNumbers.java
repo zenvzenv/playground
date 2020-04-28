@@ -1,4 +1,4 @@
-package zhengwei.LeetCode.Daily;
+package zhengwei.leetcode.daily;
 
 /**
  * LeetCode第二题-20190603
