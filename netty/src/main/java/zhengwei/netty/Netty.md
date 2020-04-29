@@ -484,6 +484,20 @@ private ChannelFuture doBind(final SocketAddress localAddress) {
     }
 }
 ```
+#### ChannelOption
+
+#### AbstractConstant
+
+#### ConstantPool
+
+#### Constant
+
+#### Attribute
+
+#### AttributeKey
+
+#### AttributeMap
+
 ### Reactor模式
 Reactor模式可以分为5个组成部分，如下图所示  
 ![reactor_model](https://github.com/zw030301/playground/blob/master/netty/src/main/resources/image/reactor_model.png)
