@@ -19,6 +19,7 @@
         <module>temp</module>
         <module>flink</module>
         <module>java</module>
+        <module>leetcode</module>
     </modules>
 
     <properties>
