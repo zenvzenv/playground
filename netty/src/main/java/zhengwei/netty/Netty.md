@@ -484,20 +484,49 @@ private ChannelFuture doBind(final SocketAddress localAddress) {
     }
 }
 ```
-#### ChannelOption
+#### ChannelOption<T>
+ChannelOption中主要维护了TCP的一些常用连接信息。
+ChannelOption允许以线程安全的方式配置ChannelConfig，具体的类型取决于泛型。它是不存具体数据的，具体的数据存在ConstantPool中。  
+在ChannelOption中已经事先定义好了许多的常量供我们使用，这些常量在获取具体数据时是使用的是 `io.netty.channel.ChannelOption.valueOf(java.lang.String)`，
+这个方法比较重要，实际是调用的ConstantPool中的 `io.netty.util.ConstantPool.getOrCreate(String)` 方法去获取具体的内容，
+```java
+private T getOrCreate(String name) {
+    T constant = constants.get(name);
+    if (constant == null) {
+        final T tempConstant = newConstant(nextId(), name);
+        constant = constants.putIfAbsent(name, tempConstant);
+        //双重判断是否存在
+        /*
+        此判断不能省略，首先putIfAbsent这个方法的解释是：当Map中没有key的值时，将第二个参数设置到key中的值并返回null，
+        如果该key在Map存在那么则返回该key的值。
+        假如有两个Thread，分别是T1和T2
+        当T1和T2同时执行的时候，并且T1和T2要往Map中获取相同key的值，如果T2先执行完毕了，但是Map中之前是没有相关key的值的，那么会返回null，
+        T1再获取key的值时，就不会返回null，而是返回真正的值，这是没有问题的，但是T2这时的返回值是null，需要对nulll返回做一次处理，
+        就返回之前T2插入到Map中的值即可。
+        */
+        if (constant == null) {
+            return tempConstant;
+        }
+    }
 
-#### AbstractConstant
-
+    return constant;
+}
+```
+通过源码可以看出最终掉用的是 `java.util.concurrent.ConcurrentMap.putIfAbsent(String, T)` 去获取最终的值。
+#### ChannelConfig
 #### ConstantPool
-
-#### Constant
-
-#### Attribute
-
-#### AttributeKey
-
-#### AttributeMap
-
+具体存放ChannelOption数据的地方，采用的是 `ConcurrentHashMap` 来管理数据，因此是进行数据的操作是线程安全的。  
+ChannelOptopn和ChannelPool的关系是：
+```text
+ChannelOption ->--维护-> ChannelPool
+```
+#### Attribute，AttributeKey，AttributeMap
+Attribute、AttributeKey和AttributeMap的关系是->AttributeMap<AttributeKey, Attribute>的关系。
+AttributeKey主要维护了业务数据。用户可以动态的管理
+#### ChannelInitializer
+一个特殊的ChannelInboundHandler,当ChannelInitializer被注册到EventLoop上的时候ChannelInitializer提供一种简单的初始化Channel。
+#### ChannelHandlerContext
+ChannelHandlerContext是ChannelPipeline和ChannelHandler交互的桥梁。
 ### Reactor模式
 Reactor模式可以分为5个组成部分，如下图所示  
 ![reactor_model](https://github.com/zw030301/playground/blob/master/netty/src/main/resources/image/reactor_model.png)
