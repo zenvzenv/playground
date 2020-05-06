@@ -387,6 +387,8 @@ pipeline.addLast(group, "handler", new MyBusinessLogicHandler());
 ##### 关于线程安全
 ChannelPipeline是线程安全的，因此ChannelHandler可以在任意时刻进行添加和移除，例如：你可以添加一个加密的处理器当你在传输加密数据时，
 在传输完成时，你也可以将加密的处理器移除，这不会有其他影响
+##### addLast(ChannelHandler)
+待补充...
 #### NioServerSocketChannel
 * 在NioServerSocketChannel中，在获取ServerSocketChannel时没有使用 `java.nio.channels.spi.SelectorProvider#provider` 方法，而是使用了 `java.nio.channels.spi.SelectorProvider.openServerSocketChannel` 方法，
 原因是因为 `SelectorProvider#provider` 中有同步代码块，会造成性能下降，每增加5000个连接性能就会下降1%；而 `SelectorProvider.openServerSocketChannel` 没有同步代码块，每次直接生成一个新的ServerSocketChannel对象，但是会消耗内存空间
@@ -518,15 +520,65 @@ private T getOrCreate(String name) {
 具体存放ChannelOption数据的地方，采用的是 `ConcurrentHashMap` 来管理数据，因此是进行数据的操作是线程安全的。  
 ChannelOptopn和ChannelPool的关系是：
 ```text
-ChannelOption ->--维护-> ChannelPool
+ChannelOption ->维护-> ChannelPool
 ```
 #### Attribute，AttributeKey，AttributeMap
 Attribute、AttributeKey和AttributeMap的关系是->AttributeMap<AttributeKey, Attribute>的关系。
 AttributeKey主要维护了业务数据。用户可以动态的管理
 #### ChannelInitializer
-一个特殊的ChannelInboundHandler,当ChannelInitializer被注册到EventLoop上的时候ChannelInitializer提供一种简单的初始化Channel。
+一个特殊的ChannelInboundHandler,当ChannelInitializer被注册到EventLoop上的时候ChannelInitializer提供一种简单的初始化Channel。  
+```java
+/**
+ * This method will be called once the {@link Channel} was registered. After the method returns this instance
+ * will be removed from the {@link ChannelPipeline} of the {@link Channel}.
+ * 这个方法会在Channel被注册到EventLoopGroup的时候被调用。在这个方法返回的时候，当前的ChannelInitializer实例会被从ChannelPipeline中移除，
+ * 因为ChannelInitializer继承自ChannelInbound，但是它实际不是一个真正的Handler，我们只是借助它往ChannelPipeline上注册很多Handler的一个辅助类而已，
+ * 所以ChannelInitializer在Channel注册完毕之后就可有可无了，就可以移除了。
+ *
+ * @param ch            the {@link Channel} which was registered.
+ * @throws Exception    is thrown if an error occurs. In that case it will be handled by
+ *                      {@link #exceptionCaught(ChannelHandlerContext, Throwable)} which will by default close
+ *                      the {@link Channel}.
+ */
+protected abstract void initChannel(C ch) throws Exception
+```
+供我们批量的快速的往ChannelPipeline中添加多个ChannelHandler，并从ChannelPipeline中移除ChannelInitializer对象。
 #### ChannelHandlerContext
-ChannelHandlerContext是ChannelPipeline和ChannelHandler交互的桥梁。
+ChannelHandlerContext是ChannelPipeline和ChannelHandler交互的桥梁。ChannelHandler与ChannelHandlerContext是一一对应的关系。
+```java
+final class DefaultChannelHandlerContext extends AbstractChannelHandlerContext {
+    //ChannelHandlerContext内部维护一个ChannelHandler
+    private final ChannelHandler handler;
+    DefaultChannelHandlerContext(DefaultChannelPipeline pipeline, EventExecutor executor, String name, ChannelHandler handler) {
+        super(pipeline, executor, name, isInbound(handler), isOutbound(handler));
+        if (handler == null) {
+            throw new NullPointerException("handler");
+        } else {
+            this.handler = handler;
+        }
+    }
+    public ChannelHandler handler() {
+        return this.handler;
+    }
+    //区分是否是入站处理器
+    private static boolean isInbound(ChannelHandler handler) {
+        return handler instanceof ChannelInboundHandler;
+    }
+    //区分是否是出站处理器
+    private static boolean isOutbound(ChannelHandler handler) {
+        return handler instanceof ChannelOutboundHandler;
+    }
+}
+AbstractChannelHandlerContext(DefaultChannelPipeline pipeline, EventExecutor executor, String name, boolean inbound, boolean outbound) {
+        this.name = (String)ObjectUtil.checkNotNull(name, "name");
+        //ChannelHandlerContext中维护了ChannelPipeline
+        this.pipeline = pipeline;
+        this.executor = executor;
+        this.inbound = inbound;
+        this.outbound = outbound;
+        this.ordered = executor == null || executor instanceof OrderedEventExecutor;
+    }
+```
 ### Reactor模式
 Reactor模式可以分为5个组成部分，如下图所示  
 ![reactor_model](https://github.com/zw030301/playground/blob/master/netty/src/main/resources/image/reactor_model.png)
@@ -561,3 +613,10 @@ Java NIO中不存在Event Handler，但是Netty弥补了这一个缺陷，Netty�
 Channel与ChannelPipeline是相互包含的关系。在Channel中持有对ChannelPipeline的引用，在ChannelPipeline中也持有Channel的引用。
 并且在初始化Channel的时候就初始化了ChannelPipeline，初始化调用过程:
 `NioServerSocketChannel -> ReflectiveChannelFactory#newChannel() -> NioServerSocketChannel(java.nio.channels.ServerSocketChannel) -> AbstractNioChannel(Channel, SelectableChannel, int) -> AbstractChannel(io.netty.channel.Channel)`
+### ChannelPipeline、ChannelHandler和ChannelHandlerContext的关系
+ChannelPipeline中存放的是一个个的ChannelHandlerContext，而ChannelHandlerContext维护一个ChannelHandler，虽然我们在代码中向ChannelPipeline
+中添加的是ChannelHandler对象( `addLaast(ChannelHandler)` 方法)，但实际内部是将ChannelHandler封装成了DefaultChannelHandlerContext，
+即ChannelHandlerContext对象。
+```text
+ChannelPipeline <--> ChannelHandlerContext <--> ChannelHandler
+```
