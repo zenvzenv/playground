@@ -387,7 +387,9 @@ pipeline.addLast(group, "handler", new MyBusinessLogicHandler());
 ##### 关于线程安全
 ChannelPipeline是线程安全的，因此ChannelHandler可以在任意时刻进行添加和移除，例如：你可以添加一个加密的处理器当你在传输加密数据时，
 在传输完成时，你也可以将加密的处理器移除，这不会有其他影响
-##### addLast(ChannelHandler)
+##### 重要方法
+###### addLast(ChannelHandler)
+最终实际调用的是 `io.netty.channel.DefaultChannelPipeline.addLast(io.netty.util.concurrent.EventExecutorGroup, java.lang.String, io.netty.channel.ChannelHandler)`
 待补充...
 #### NioServerSocketChannel
 * 在NioServerSocketChannel中，在获取ServerSocketChannel时没有使用 `java.nio.channels.spi.SelectorProvider#provider` 方法，而是使用了 `java.nio.channels.spi.SelectorProvider.openServerSocketChannel` 方法，
@@ -620,3 +622,4 @@ ChannelPipeline中存放的是一个个的ChannelHandlerContext，而ChannelHand
 ```text
 ChannelPipeline <--> ChannelHandlerContext <--> ChannelHandler
 ```
+### Channel与ChannelHandlerContext的作用域的问题
