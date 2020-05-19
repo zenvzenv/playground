@@ -366,47 +366,72 @@ HashMap对于其他集合的扩容有点不一样，HashMap每次都扩容到原
 ```java
 //初始化桶数组或将桶数组的大小变为原来的两倍
 final Node<K,V>[] resize() {
+    //最开始table是没有被初始化的，延迟加载
     Node<K,V>[] oldTab = table;
+    //没有初始化的话，那么初始化旧的桶数组的长度为0
     int oldCap = (oldTab == null) ? 0 : oldTab.length;
     int oldThr = threshold;
     int newCap, newThr = 0;
+    //如果桶数组已被初始化
     if (oldCap > 0) {
+        //如果容量已达到Integer.MAX_VALUE - 8，那么不扩容
         if (oldCap >= MAXIMUM_CAPACITY) {
             threshold = Integer.MAX_VALUE;
             return oldTab;
         }
+        //否则将就容量扩容到原来的两倍，并重新计算阈值的大小
         else if ((newCap = oldCap << 1) < MAXIMUM_CAPACITY &&
                  oldCap >= DEFAULT_INITIAL_CAPACITY)
+            //新的阈值调整为原来的两倍
             newThr = oldThr << 1; // double threshold
     }
     else if (oldThr > 0) // initial capacity was placed in threshold
+        //此处是我们在实例化HashMap时指定了初始容量
+        //初始化时，如果我们在构造方法中指定了初始容量，那么HashMap会计算出一个大于初始容量的二次幂的数，并将这个数赋值给threshold
+        //其实这个threshold就是HashMap初始化的容量，只是暂存在了threshold中，后续会重新计算threshold(capacity * loadFactory)
         newCap = oldThr;
     else {               // zero initial threshold signifies using defaults
+        //如果我们调用的时午餐构造器时
+        //初始化桶数组的大小为默认大小，默认值是16
         newCap = DEFAULT_INITIAL_CAPACITY;
+        //使用默认的负载因子计算threshold
         newThr = (int)(DEFAULT_LOAD_FACTOR * DEFAULT_INITIAL_CAPACITY);
     }
+    //当threshold溢出为0时，重新计算threshold，兜底操作
+    //最大值为Integer.MAX_VALUE
     if (newThr == 0) {
         float ft = (float)newCap * loadFactor;
         newThr = (newCap < MAXIMUM_CAPACITY && ft < (float)MAXIMUM_CAPACITY ?
                   (int)ft : Integer.MAX_VALUE);
     }
+    //重新校准threshold的值
     threshold = newThr;
     @SuppressWarnings({"rawtypes","unchecked"})
+    //创建新的桶数组
     Node<K,V>[] newTab = (Node<K,V>[])new Node[newCap];
     table = newTab;
+    //如果原来的数组不为空的话，那么将原来的数组中的元素复制到新的数组中
     if (oldTab != null) {
+        //遍历旧桶
         for (int j = 0; j < oldCap; ++j) {
             Node<K,V> e;
+            //如果桶上的元素不为空，说明此桶中有元素
             if ((e = oldTab[j]) != null) {
+                //gc helper，将该桶清空
                 oldTab[j] = null;
+                //如果该桶中只有一个元素
                 if (e.next == null)
+                    //将旧桶中这一个元素进行重新定位桶
                     newTab[e.hash & (newCap - 1)] = e;
+                //如果是红黑树节点
                 else if (e instanceof TreeNode)
+                    //调用红黑树的映射方法
                     ((TreeNode<K,V>)e).split(this, newTab, j, oldCap);
                 else { // preserve order
                     Node<K,V> loHead = null, loTail = null;
                     Node<K,V> hiHead = null, hiTail = null;
                     Node<K,V> next;
+                    //遍历链表，并将原链表按原来的顺序进行分组
                     do {
                         next = e.next;
                         if ((e.hash & oldCap) == 0) {
@@ -415,8 +440,7 @@ final Node<K,V>[] resize() {
                             else
                                 loTail.next = e;
                             loTail = e;
-                        }
-                        else {
+                        } else {
                             if (hiTail == null)
                                 hiHead = e;
                             else
@@ -439,3 +463,92 @@ final Node<K,V>[] resize() {
     return newTab;
 }
 ```
+针对于resize方法，大致可将其逻辑分为以下几个步骤：
+1. 计算新桶的容量newCap和新的阈值newThr
+2. 根据计算出来的新桶的容量newCap创建新的桶数组，桶数组table也是在这里被初始化的
+3. 将旧桶中的键值对映射到新桶中。如果节点是 TreeNode 类型，则需要拆分红黑树。如果是普通节点，则节点按原顺序进行分组。  
+针对于以上三点中的，resize代码中有如下体现(略去了初始化table部分)：
+```java
+// 第一个条件分支
+if (oldCap > 0) {
+    // 嵌套条件分支
+    if (oldCap >= MAXIMUM_CAPACITY) {...}
+    else if ((newCap = oldCap << 1) < MAXIMUM_CAPACITY &&
+                 oldCap >= DEFAULT_INITIAL_CAPACITY) {...}
+} 
+else if (oldThr > 0) {...}
+else {...}
+
+// 第二个条件分支
+if (newThr == 0) {...}
+```
+### 计算容量和阈值分支一
+通过这两个分支来对newCap和newThr进行计算，覆盖的范围如下所示：
+
+|条件                  | 覆盖情况                          | 备注                                                                                                    |  
+|:---------------------:|:-------------------------------:|:------------------------------------------------------------------------------------------------------:|  
+|oldCap > 0           |桶数组已经被初始化过              |                                                                                                            |  
+|oldThr > 0           |threshold>0，且桶数组没有被初始化  | 在调用HashMa(int)或HashMap(int, float)构造方法时产生这种情况，此种情况newCap=oldThr，newThr在第二个分支中计算得出 |  
+|oldThr==0&&oldCap==0|桶没有被初始化，并且threshold也为0 | 调用HashMap默认的构造方法时会出现这种情况                                                                      |  
+
+对于 `oldThr>0` 这种情况，oldThr会被赋值给oldCap，也就是 `oldCap = oldThr = tableSizeFor(initialCapacity)` 。我们实例化HashMap
+时传入的initialCapacity经过threshold最终被赋值给了newCap，也就是HashMap为什么没有initialCapacity这个变量的原因，threshold一开始
+作为一个临时的容量字段，在初始化后续会更正threshold的值。  
+分之一中的嵌套分支：  
+
+| 条件                       | 覆盖情况                                  | 备注                                                    |
+| :----------------------------: | :---------------------------------------------: | :---------------------------------------------------------: |
+| oldCap >= 2^30               | 桶数组容量大于或等于最大桶容量 2^30 | 这种情况下不再扩容                               |
+| newCap < 2^30 && oldCap > 16 | 新桶数组容量小于最大值，且旧桶数组容量大于 16 | 该种情况下新阈值 newThr = oldThr << 1，移位可能会导致溢出 |
+
+对于阈值移位导致溢出的操作：
+```text
+初始状态
+loadFactor = 8.0
+initialCapacity = 2^28                          0001 0000 0000 0000 0000 0000 0000 0000
+threshold = 2 ^ 28                              0001 0000 0000 0000 0000 0000 0000 0000
+-------------------------------------------------------------------------------------------
+第一次扩容
+oldCap = 0
+oldThr = threshold = 2^28                       0001 0000 0000 0000 0000 0000 0000 0000
+newCap = oldThr = 2^28                          0001 0000 0000 0000 0000 0000 0000 0000
+newThr = newCap * loadFactory = 2^31            1000 0000 0000 0000 0000 0000 0000 0000
+-------------------------------------------------------------------------------------------
+第二次扩容
+oldCap = 2^28                                   0001 0000 0000 0000 0000 0000 0000 0000
+newCap = oldCap << 1 = 2^29                     0010 0000 0000 0000 0000 0000 0000 0000
+oldThr = 2^31                                   1000 0000 0000 0000 0000 0000 0000 0000
+newThr = oldThr << 1 = 0                        0000 0000 0000 0000 0000 0000 0000 0000
+最终溢出为0
+```
+### 计算容量和阈值分支二
+
+| 条件 | 覆盖情况 |
+| -------- | -------- |
+| newThr == 0   | 对于第一个分支未计算或溢出的newThr情况   |
+对没有计算或溢出的阈值进行重新计算，最大的阈值时 `Integer.MAX_VALUE`
+### 键值对重新映射
+jdk1.8中HashMap中节点有两种类型，链表的节点或者是红黑树节点。对于红黑树节点而言，需要先对红黑树进行拆分再进行映射；对于链表节点，需要
+先对节点进行分组，再映射，需要注意的是，分组后，组内节点相对位置没有发生改变。
+#### 链表映射
+对于链表的插入过程，底层一般是通过模运算获取所在桶的位置，接着将节点放入到桶中或放到链表的尾部即可。事实上，我们可以重新映射看作是插入
+过程，在jdk1.7中也确实插入的过程，但在jdk1.8中，对这个过程进行了优化，过程较为复杂。对于hash过程：
+```text
+n - 1   0000 1111
+hash1   1011 1001  &  -->  0000 1001 = 9
+hash2   1010 1001  &  -->  0000 1001 = 9
+桶数组大小为16，虽然hash1和hash2不相等，但是其低四位是相等，所以计算出来的桶的位置也就是相同的。
+```
+对HashMap进行扩容后，桶数组的长度由16变成了32，参与模运算的位数由4变成了5，所以计算出的桶的位置也就不一样了。
+```text
+扩容后
+n - 1   0001 1111
+hash1   1011 1001  &  -->  0001 1001 = 16 + 9 = oldCap + 原位置
+hash2   1010 1001  &  -->  0000 1001 = 9 = 原位置
+对于扩容后，寻找新桶，无非就是要不要再原来桶的基础上加oldCap
+```
+## 问题
+### HashMap中的容量有限制吗？这个容量实际是干嘛用的？
+HashMap中的容量其实对HashMap中能够存多少容量没有起到作用，只是用来初始化了桶数组长度和阈值计算。理论上HashMap能够存无限个元素，
+元素存在的形式是链表或红黑树，链表和红黑树后面可以无限接数据，但是这样会降低增删改查的效率，为了不出现这种不利局面，
+容量被用来了计算一个阈值，凭借着足够复杂的hash，不会出现单一链表的情况，分布的还算平均，当HashMap中的元素个数超过阈值时就进行扩容。
