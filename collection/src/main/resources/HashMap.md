@@ -434,12 +434,15 @@ final Node<K,V>[] resize() {
                     //遍历链表，并将原链表按原来的顺序进行分组
                     do {
                         next = e.next;
+                        //对链表中的元素进行分组，分组的依据就是(e.hash & oldCap)是否等于0
+                        //当e.hash&oldCap等于0时，被分到新的lo链表中
                         if ((e.hash & oldCap) == 0) {
                             if (loTail == null)
                                 loHead = e;
                             else
                                 loTail.next = e;
                             loTail = e;
+                        //当e.hash&oldCap不为0时，被分到新的hi链表中
                         } else {
                             if (hiTail == null)
                                 hiHead = e;
@@ -448,12 +451,15 @@ final Node<K,V>[] resize() {
                             hiTail = e;
                         }
                     } while ((e = next) != null);
+                    //最终形成两个新的链表：lo和hi
                     if (loTail != null) {
                         loTail.next = null;
+                        //将lo链表不变动位置，继续放在原来的桶的位置
                         newTab[j] = loHead;
                     }
                     if (hiTail != null) {
                         hiTail.next = null;
+                        //因为扩容后的容量总是原来的两倍，高位被左移了一位，重新计算所在桶时,无非就是要不要加上oldCap
                         newTab[j + oldCap] = hiHead;
                     }
                 }
@@ -546,6 +552,229 @@ n - 1   0001 1111
 hash1   1011 1001  &  -->  0001 1001 = 16 + 9 = oldCap + 原位置
 hash2   1010 1001  &  -->  0000 1001 = 9 = 原位置
 对于扩容后，寻找新桶，无非就是要不要再原来桶的基础上加oldCap
+```
+### 扩容总结
+HashMap在扩完容之后，元素的相对位置没有发生变化，原来在前面的元素还是在前面，在后面的元素还是在后面。jdk1.8的扩容方法相对于jdk1.7而言
+在性能上是有提升的，在jdk1.7中，为了防止HashMap碰撞引发的拒绝服务的情况，在计算hash时引入了随机种子，以增强随机性，使得键值均匀的分布
+在桶中，在扩容时也会根据容量判断是否需要重新生成随机种子，并重新计算所有hash，而在jdk1.8中，引入了红黑树来替代这种方案，避免重新hash的
+次数，提高效率。
+## 链表树化、红黑树链化和拆分
+```java
+//将链表转成树的链表中元素个数的阈值
+static final int TREEIFY_THRESHOLD = 8;
+
+/*
+ * 当桶数组容量小于该值时，优先进行扩容，而不是树化
+ */
+static final int MIN_TREEIFY_CAPACITY = 64;
+
+static final class TreeNode<K,V> extends LinkedHashMap.Entry<K,V> {
+    TreeNode<K,V> parent;  // red-black tree links
+    TreeNode<K,V> left;
+    TreeNode<K,V> right;
+    TreeNode<K,V> prev;    // needed to unlink next upon deletion
+    boolean red;
+    TreeNode(int hash, K key, V val, Node<K,V> next) {
+        super(hash, key, val, next);
+    }
+}
+/**
+ * 将普通节点链表转换成树形节点链表
+ */
+final void treeifyBin(Node<K,V>[] tab, int hash) {
+    int n, index; Node<K,V> e;
+    // 桶数组容量小于 MIN_TREEIFY_CAPACITY，优先进行扩容而不是树化
+    if (tab == null || (n = tab.length) < MIN_TREEIFY_CAPACITY)
+        resize();
+    else if ((e = tab[index = (n - 1) & hash]) != null) {
+        // hd 为头节点(head)，tl 为尾节点(tail)
+        TreeNode<K,V> hd = null, tl = null;
+        do {
+            // 将普通节点替换成树形节点
+            TreeNode<K,V> p = replacementTreeNode(e, null);
+            if (tl == null)
+                hd = p;
+            else {
+                p.prev = tl;
+                //TreeNOde 仍然保存了链表中的next引用
+                tl.next = p;
+            }
+            tl = p;
+        } while ((e = e.next) != null);  // 将普通链表转成由树形节点链表
+        if ((tab[index] = hd) != null)
+            // 将树形链表转换成红黑树
+            hd.treeify(tab);
+    }
+}
+//将普通链表节点转换为红黑树节点
+TreeNode<K,V> replacementTreeNode(Node<K,V> p, Node<K,V> next) {
+    return new TreeNode<>(p.hash, p.key, p.value, next);
+}
+```
+将链表树化需要满足两个条件：
+1. 链表的长度大于等于TREEIFY_THRESHOLD
+2. 桶数组的长度大于等于MIN_TREEIFY_CAPACITY，当桶数组比较小时，键值对的hash碰撞的概率本来就比较高，从而导致链表的长度变长，这时候应
+该优先扩容，而不是将链表树化，毕竟高的hash碰撞是因为桶数组过短导致的。容量小时，进行扩容操作，可以避免一些树化的复杂的操作过程。同时，
+桶的容量比较小时，扩容比较频繁，扩容时需要拆分红黑树进行重新映射，所以在桶容量比较小的情况下，将长链表转成红黑树是一件吃力不讨好的事。  
+因为红黑树需要比较节点的大小，但是HashMap在设计之初并没有考虑到这一点，所以在比较键与键之间大小有如下几个方法：
+1. 比较键的hash值，如果hash相同则继续比较
+2. 检测键类是否实现了Comparable接口，如果实现了则调用compareTo方法进行比较
+3. 如果仍未比较出大小，就需要进行仲裁，仲裁方法为tieBreakOrder
+通过以上三个步骤就可以比较出键的大小关系。比较出大小后就可以进行红黑树的转化过程了。即使转成了红黑树，原链表的顺序任然会被保留，我们任然
+可以像遍历链表一样去遍历红黑树。
+#### 红黑树拆分
+扩容后，普通节点需要重新映射，红黑树也不例外。常规思路是将红黑树映射成链表，再将链表进行重新映射即可，但是这种方式的效率地下，在HashMap
+中，HashMap通过两个额外的prev和next引用保留了原链表的节点顺序。这样对红黑树进行重新映射，完全可以按照链表的形式去映射，避免了红黑树转
+链表后再映射，提高效率。具体代码如下：
+```java
+// 红黑树转链表阈值
+static final int UNTREEIFY_THRESHOLD = 6;
+final void split(HashMap<K,V> map, Node<K,V>[] tab, int index, int bit) {
+    TreeNode<K,V> b = this;
+    // Relink into lo and hi lists, preserving order
+    TreeNode<K,V> loHead = null, loTail = null;
+    TreeNode<K,V> hiHead = null, hiTail = null;
+    int lc = 0, hc = 0;
+    /* 
+     * 红黑树节点仍然保留了 next 引用，故仍可以按链表方式遍历红黑树。
+     * 下面的循环是对红黑树节点进行分组，与上面类似
+     */
+    for (TreeNode<K,V> e = b, next; e != null; e = next) {
+        next = (TreeNode<K,V>)e.next;
+        e.next = null;
+        //重新划分的过程与链表类似，bit为oldCap
+        //最终形成两个TreeNode的链表。
+        if ((e.hash & bit) == 0) {
+            if ((e.prev = loTail) == null)
+                loHead = e;
+            else
+                loTail.next = e;
+            loTail = e;
+            ++lc;
+        }
+        else {
+            if ((e.prev = hiTail) == null)
+                hiHead = e;
+            else
+                hiTail.next = e;
+            hiTail = e;
+            ++hc;
+        }
+    }
+    if (loHead != null) {
+        // 如果 loHead 不为空，且链表长度小于等于 6，则将红黑树转成链表
+        if (lc <= UNTREEIFY_THRESHOLD)
+            tab[index] = loHead.untreeify(map);
+        else {
+            tab[index] = loHead;
+            /* 
+             * hiHead == null 时，表明扩容后，
+             * 所有节点仍在原位置，树结构不变，无需重新树化
+             */
+            if (hiHead != null) 
+                loHead.treeify(tab);
+        }
+    }
+    // 与上面类似
+    if (hiHead != null) {
+        if (hc <= UNTREEIFY_THRESHOLD)
+            tab[index + bit] = hiHead.untreeify(map);
+        else {
+            tab[index + bit] = hiHead;
+            if (loHead != null)
+                hiHead.treeify(tab);
+        }
+    }
+}
+```
+重新映射红黑树的逻辑与链表的基本一致，不同之处在于经过红黑树重新映射之后，会将红黑树拆分成两个TreeNode链表。如果链表的长度小于UNTREEIFY_THRESHOLD，
+则将TreeNode链表转换操普通的Node链表，否则根据条件重新将TreeNode链表树化。
+#### 红黑树链化
+前面说过，红黑树中仍然保留了原链表节点顺序。有了这个前提，再将红黑树转成链表就简单多了，仅需将 TreeNode 链表转成 Node 类型的链表即可
+```java
+//红黑树链化
+final Node<K,V> untreeify(HashMap<K,V> map) {
+    Node<K,V> hd = null, tl = null;
+    // 遍历 TreeNode 链表，并用 Node 替换
+    for (Node<K,V> q = this; q != null; q = q.next) {
+        // 替换节点类型
+        Node<K,V> p = map.replacementNode(q, null);
+        if (tl == null)
+            hd = p;
+        else
+            tl.next = p;
+        tl = p;
+    }
+    return hd;
+}
+//将TreeNode转成Node
+Node<K,V> replacementNode(Node<K,V> p, Node<K,V> next) {
+    return new Node<>(p.hash, p.key, p.value, next);
+}
+```
+## 删除
+HashMap 的删除操作并不复杂，仅需三个步骤即可完成:  
+1. 定位桶位置
+2. 遍历链表并找到键值相等的节点
+3. 删除节点。  
+相关源码如下：
+```java
+public V remove(Object key) {
+    Node<K,V> e;
+    return (e = removeNode(hash(key), key, null, false, true)) == null ?
+        null : e.value;
+}
+
+final Node<K,V> removeNode(int hash, Object key, Object value,
+                           boolean matchValue, boolean movable) {
+    //index是计算出来的所在的桶的索引值
+    Node<K,V>[] tab; Node<K,V> p; int n, index;
+    if ((tab = table) != null && (n = tab.length) > 0 &&
+        // 1. 定位桶位置
+        //p是桶中的第一个元素
+        (p = tab[index = (n - 1) & hash]) != null) {
+        Node<K,V> node = null, e; K k; V v;
+        // 如果键的值与链表第一个节点相等，则将 node 指向该节点
+        if (p.hash == hash &&
+            ((k = p.key) == key || (key != null && key.equals(k))))
+            node = p;
+        else if ((e = p.next) != null) {  
+            // 如果是 TreeNode 类型，调用红黑树的查找逻辑定位待删除节点
+            if (p instanceof TreeNode)
+                node = ((TreeNode<K,V>)p).getTreeNode(hash, key);
+            else {
+                // 2. 遍历链表，找到待删除节点
+                do {
+                    if (e.hash == hash &&
+                        ((k = e.key) == key ||
+                         (key != null && key.equals(k)))) {
+                        node = e;
+                        break;
+                    }
+                    p = e;
+                } while ((e = e.next) != null);
+            }
+        }
+        
+        // 3. 删除节点，并修复链表或红黑树
+        if (node != null && (!matchValue || (v = node.value) == value ||
+                             (value != null && value.equals(v)))) {
+            if (node instanceof TreeNode)
+                ((TreeNode<K,V>)node).removeTreeNode(this, tab, movable);
+            //如果桶的第一个元素就是要移除的元素，直接指向node的下一个元素
+            else if (node == p)
+                tab[index] = node.next;
+            //否则将第一个元素的下一个指向下一个元素
+            else
+                p.next = node.next;
+            ++modCount;
+            --size;
+            afterNodeRemoval(node);
+            return node;
+        }
+    }
+    return null;
+}
 ```
 ## 问题
 ### HashMap中的容量有限制吗？这个容量实际是干嘛用的？
