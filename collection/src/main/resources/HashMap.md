@@ -135,7 +135,7 @@ n - 1   : 0000 1111  &
 即200 % 16 = 8 
 ```
 ### hash
-hash也是一个比较关键的小方法。其代码如下：
+hash也是一个比较关键的小方法，我们称其为 `扰动函数` 。其代码如下：
 ```java
 //计算一个元素键的hash值
 static final int hash(Object key) {
@@ -776,6 +776,18 @@ final Node<K,V> removeNode(int hash, Object key, Object value,
     return null;
 }
 ```
+## 其它细节
+### 被transient修饰的table
+在HashMap中，桶数组是被transient修饰的，transient标识易变的意思，也就是说table不会被默认的序列化机制序列化，考虑一个问题：桶数组
+table 是 HashMap 底层重要的数据结构，不序列化的话，别人还怎么还原呢？  
+HashMap并没有使用默认的序列化机制，而是通过实现了 `readObject/writeObject` 方法来实现序列化的，因为HashMap只是存储 `键值对` 的，
+所以我们只需要将键值对序列化即可，然后根据序列化重建HashMap。有的朋友会像，直接序列化table不是一步到位了嘛，后面直接还原table就行了，
+但是这样做有两个问题：
+1. table多数情况下无法被塞满，序列化未使用的部分会造成空间浪费
+2. 同一个键在不同的JVM中所处的桶的位置可能不同，在不同的JVM下反序列化table可能会发生错误  
+以上两个问题，第一个比较容易理解；对于第二个问题，HashMap中是根据 `get/put/remove` 方法对元素进行操作，这些方法的第一步就是根据hash
+先定位桶的位置，但如果没有覆写hashCode方法，计算hash最终调用的是Object中的hashCode方法。但是Object中的hashCode方法是native的，在不
+同的JVM中实现可能不一样，产生hash可能会不同，也就是说同一个对象可能会产生不同的hash，此时在对同一个key进行操作的话，就会出现问题。
 ## 问题
 ### HashMap中的容量有限制吗？这个容量实际是干嘛用的？
 HashMap中的容量其实对HashMap中能够存多少容量没有起到作用，只是用来初始化了桶数组长度和阈值计算。理论上HashMap能够存无限个元素，
