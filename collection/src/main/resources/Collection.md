@@ -228,5 +228,67 @@ private boolean batchRemove(Collection<?> c, boolean complement) {
 ### 内部类
 #### Itr
 Itr实现了Iterator接口，提供遍历功能
+#### 注意事项
+在使用Itr提供的迭代功能的时候，不可以使用ArrayList提供的remove方法，如果使用了ArrayList提供的方法，会导致modCount发生变化，但是Itr中的next方法中，每次都会去校验modCount和expectModCount，如果两者不相等，
+则表示List在迭代过程中发生了变化，会抛出ConcurrentModifyException。
+```java
+public E next() {
+    //校验modCount和expectModCount，校验ArrayList是否被修改过
+    checkForComodification();
+    int i = cursor;
+    if (i >= size)
+        throw new NoSuchElementException();
+    Object[] elementData = ArrayList.this.elementData;
+    if (i >= elementData.length)
+        throw new ConcurrentModificationException();
+    cursor = i + 1;
+    return (E) elementData[lastRet = i];
+}
+final void checkForComodification() {
+    if (modCount != expectedModCount)
+        throw new ConcurrentModificationException();
+}
+```
+如果想在迭代过程中删除元素，需要使用Itr提供的remove方法，实际还是调用的ArrayList中的remove方法，但此方法会在remove之后校准modCount和expect，以免下一次next时报错。
+```java
+public void remove() {
+    if (lastRet < 0)
+        throw new IllegalStateException();
+    checkForComodification();
+    try {
+        //实际调用ArrayList中的remove方法
+        ArrayList.this.remove(lastRet);
+        //将最后一个元素的下一个元素的索引往前挪一位
+        cursor = lastRet;
+        //重置最后一个元素的索引
+        lastRet = -1;
+        //校准expectModCount和modCount，以免下一次的next报错
+        expectedModCount = modCount;
+    } catch (IndexOutOfBoundsException ex) {
+        throw new ConcurrentModificationException();
+    }
+}
+```
+在Java8中新提供的forEachRemaining方法，同样的此方法不能够对元素进行移除.
+```java
+@Override
+public void forEachRemaining(Consumer<? super E> action) {
+    Objects.requireNonNull(action);
+    final int size = ArrayList.this.size;
+    int i = cursor;
+    if (i < size) {
+        final Object[] es = elementData;
+        if (i >= es.length)
+            throw new ConcurrentModificationException();
+        for (; i < size && modCount == expectedModCount; i++)
+            action.accept(elementAt(es, i));
+        // update once at end to reduce heap write traffic
+        cursor = i;
+        lastRet = i - 1;
+        checkForComodification();
+    }
+}
+```
 #### ListItr
 ListItr继承自Itr，实现了ListIterator接口，提供从后向前遍历的能力
+## LinkedList
