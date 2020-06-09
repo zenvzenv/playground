@@ -52,6 +52,7 @@ public final void acquire(int arg) {
         acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
         selfInterrupt();
 }
+//尝试上锁
 protected final boolean tryAcquire(int acquires) {
     return nonfairTryAcquire(acquires);
 }
@@ -92,4 +93,108 @@ final boolean nonfairTryAcquire(int acquires) {
 >如果T1加锁成功，那么state的值为1，T2来加锁时，就会去执行 `acquire(int)` 方法，最终调用 `nonfairTryAcquire(int)` 方法，因为当前
 >持有锁的是T1，那么T2执行这个方法会返回false，然后将T2通过addWaiter(Node.EXCLUSIVE)方法加入到FIFO队列中；如果再次加锁的是T1的
 >话，那么在原来的state的基础上加上acquires的值，这也是可重入的表现。
-
+### 对于加锁失败进入到FIFO队列
+```java
+//是将node添加到FIFO的队尾
+private Node addWaiter(Node mode) {
+    //创建一个队列的节点Node，此Node包含当前竞争资源失败的线程
+    Node node = new Node(Thread.currentThread(), mode);
+    // Try the fast path of enq; backup to full enq on failure
+    Node pred = tail;
+    //如果此时的队尾不为null
+    if (pred != null) {
+        node.prev = pred;
+        if (compareAndSetTail(pred, node)) {
+            pred.next = node;
+            return node;
+        }
+    }
+    //如果此时队尾为null。则调用enq方法，将竞争失败的线程加到队列的尾部
+    enq(node);
+    return node;
+}
+//将Node加到队列的队尾
+private Node enq(final Node node) {
+    for (;;) {
+        Node t = tail;
+        if (t == null) { // Must initialize
+            if (compareAndSetHead(new Node()))
+                tail = head;
+        } else {
+            node.prev = t;
+            if (compareAndSetTail(t, node)) {
+                t.next = node;
+                return t;
+            }
+        }
+    }
+}
+```
+上面的代码执行完毕后，竞争资源失败的线程将会加到队列的尾部
+```text
+--------     ------      ----       ------
+| head | -> | Node | -> | T2 | ->  | tail |
+--------     ------      ----       ------
+其实head也是一个普通的Thread封装的Node节点，head节点的Thread将会被唤醒
+```
+在addWaiter方法后会返回关于当前线程的Node信息，接下来就进入了 `acquireQueued(Node, int)` 方法了。
+```java
+final boolean acquireQueued(final Node node, int arg) {
+    boolean failed = true;
+    try {
+        boolean interrupted = false;
+        for (;;) {
+            //获取当前Node的前一个节点
+            final Node p = node.predecessor();
+            //如果p当前Node的前一个节点是head，那么尝试获取锁
+            if (p == head && tryAcquire(arg)) {
+                //加锁成功后将当前节点设置成head
+                setHead(node);
+                //方便GC进行回收资源
+                p.next = null; // help GC
+                failed = false;
+                return interrupted;
+            }
+            //如果加锁失败或者前一个节点不是head
+            //
+            if (shouldParkAfterFailedAcquire(p, node) &&
+                parkAndCheckInterrupt())
+                interrupted = true;
+        }
+    } finally {
+        if (failed)
+            cancelAcquire(node);
+    }
+}
+private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
+    int ws = pred.waitStatus;
+    if (ws == Node.SIGNAL)
+        /*
+         * This node has already set status asking a release
+         * to signal it, so it can safely park.
+         */
+        return true;
+    if (ws > 0) {
+        /*
+         * Predecessor was cancelled. Skip over predecessors and
+         * indicate retry.
+         */
+        do {
+            node.prev = pred = pred.prev;
+        } while (pred.waitStatus > 0);
+        pred.next = node;
+    } else {
+        /*
+         * waitStatus must be 0 or PROPAGATE.  Indicate that we
+         * need a signal, but don't park yet.  Caller will need to
+         * retry to make sure it cannot acquire before parking.
+         */
+        compareAndSetWaitStatus(pred, ws, Node.SIGNAL);
+    }
+    return false;
+}
+private final boolean parkAndCheckInterrupt() {
+    LockSupport.park(this);
+    return Thread.interrupted();
+}
+```
