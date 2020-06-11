@@ -113,17 +113,26 @@ private Node addWaiter(Node mode) {
     enq(node);
     return node;
 }
-//将Node加到队列的队尾
+//将竞争资源的Thread的Node加到队列的队尾
 private Node enq(final Node node) {
     for (;;) {
         Node t = tail;
+        //如果队尾为null，即队列还没有初始化的时候
         if (t == null) { // Must initialize
+            //用CAS算法将一个临时的 空Node节点设置为head节点
             if (compareAndSetHead(new Node()))
+                //同时tail节点也指向head节点
+                //至此FIFO双向队列被初始化为：t -> tail -> head -> Node
                 tail = head;
-        } else {
+        } else {//如果队列已经被初始化过了，或者tail不为null
+            //将当前竞争资源的Thread的Node的前驱节点指向t(tail)
+            //将node节点放到队列的最后
             node.prev = t;
+            //将node设置为tail节点
             if (compareAndSetTail(t, node)) {
+                //将之前的tail节点的后驱节点指向node
                 t.next = node;
+                //返回之前的tail节点
                 return t;
             }
         }
@@ -132,19 +141,25 @@ private Node enq(final Node node) {
 ```
 上面的代码执行完毕后，竞争资源失败的线程将会加到队列的尾部
 ```text
---------     ------      ----       ------
-| head | -> | Node | -> | T2 | ->  | tail |
---------     ------      ----       ------
-其实head也是一个普通的Thread封装的Node节点，head节点的Thread将会被唤醒
+ ------      ----      
+| Node | -> | T2 |
+ ------      ----      
+   |           |
+   |           |
+--------     ------
+| head |    | tail |
+--------     ------
+head和tail类似于一个标识，标识了这个节点的位置属性。
 ```
 在addWaiter方法后会返回关于当前线程的Node信息，接下来就进入了 `acquireQueued(Node, int)` 方法了。
 ```java
+//尝试加锁
 final boolean acquireQueued(final Node node, int arg) {
     boolean failed = true;
     try {
         boolean interrupted = false;
         for (;;) {
-            //获取当前Node的前一个节点
+            //获取当前竞争资源的Thread的Node的前一个节点
             final Node p = node.predecessor();
             //如果p当前Node的前一个节点是head，那么尝试获取锁
             if (p == head && tryAcquire(arg)) {
@@ -156,7 +171,7 @@ final boolean acquireQueued(final Node node, int arg) {
                 return interrupted;
             }
             //如果加锁失败或者前一个节点不是head
-            //
+            //如果尝试获取资源失败了，那么应该被挂起
             if (shouldParkAfterFailedAcquire(p, node) &&
                 parkAndCheckInterrupt())
                 interrupted = true;
@@ -166,7 +181,10 @@ final boolean acquireQueued(final Node node, int arg) {
             cancelAcquire(node);
     }
 }
+//如果尝试加锁失败，那么挂起线程
+//将节点为cancelled状态的节点移除，将节点waitStatus为0的(int默认是0)节点置为SIGNAL(-1)
 private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
+    //node节点的前一个节点的等待状态
     int ws = pred.waitStatus;
     if (ws == Node.SIGNAL)
         /*
@@ -174,7 +192,7 @@ private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
          * to signal it, so it can safely park.
          */
         return true;
-    if (ws > 0) {
+    if (ws > 0) {//如果节点的状态是CANCELLED的话，那么移除节点
         /*
          * Predecessor was cancelled. Skip over predecessors and
          * indicate retry.
@@ -189,10 +207,12 @@ private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
          * need a signal, but don't park yet.  Caller will need to
          * retry to make sure it cannot acquire before parking.
          */
+        //把所有cancelled节点移除后，将head系欸但那的waitStatus置为-1
         compareAndSetWaitStatus(pred, ws, Node.SIGNAL);
     }
     return false;
 }
+//挂起线程并且检查线程的打断状态
 private final boolean parkAndCheckInterrupt() {
     LockSupport.park(this);
     return Thread.interrupted();
