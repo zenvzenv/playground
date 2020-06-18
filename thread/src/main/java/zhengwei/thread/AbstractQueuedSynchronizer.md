@@ -48,6 +48,7 @@ protected final void setExclusiveOwnerThread(Thread thread) {
 一个FIFO的等待队列，通过UNSAFE的park()挂起。
 ```java
 public final void acquire(int arg) {
+    //如果获取锁失败并且加入到CLH队列失败的话，则打断当前线程
     if (!tryAcquire(arg) &&
         acquireQueued(addWaiter(Node.EXCLUSIVE), arg))
         selfInterrupt();
@@ -154,10 +155,12 @@ head和tail类似于一个标识，标识了这个节点的位置属性。
 在addWaiter方法后会返回关于当前线程的Node信息，接下来就进入了 `acquireQueued(Node, int)` 方法了。
 ```java
 //尝试加锁
+//当前线程尝试获取锁，获取不到挂起线程
 final boolean acquireQueued(final Node node, int arg) {
     boolean failed = true;
     try {
         boolean interrupted = false;
+        //自旋，这里有个死循环来确保没竞争到资源的线程被挂起
         for (;;) {
             //获取当前竞争资源的Thread的Node的前一个节点
             final Node p = node.predecessor();
@@ -207,7 +210,7 @@ private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
          * need a signal, but don't park yet.  Caller will need to
          * retry to make sure it cannot acquire before parking.
          */
-        //把所有cancelled节点移除后，将head系欸但那的waitStatus置为-1
+        //把所有cancelled节点移除后，将当前竞争资源的线程的前一个节点的waitStatus置为SIGNAL状态
         compareAndSetWaitStatus(pred, ws, Node.SIGNAL);
     }
     return false;
@@ -216,5 +219,174 @@ private static boolean shouldParkAfterFailedAcquire(Node pred, Node node) {
 private final boolean parkAndCheckInterrupt() {
     LockSupport.park(this);
     return Thread.interrupted();
+}
+```
+### `NonfairSync` 释放锁
+释放锁的主要方法是 `release(int)` 
+```java
+public final boolean release(int arg) {
+    //如果释放锁成功了
+    if (tryRelease(arg)) {
+        Node h = head;
+        if (h != null && h.waitStatus != 0)
+            unparkSuccessor(h);
+        return true;
+    }
+    return false;
+}
+```
+最终调用的是AQS的 `tryRelease` 方法。
+```java
+protected final boolean tryRelease(int releases) {
+    //如果一个线程的获取多次锁
+    int c = getState() - releases;
+    if (Thread.currentThread() != getExclusiveOwnerThread())
+        throw new IllegalMonitorStateException();
+    boolean free = false;、
+    //如果所有锁都已释放完毕
+    if (c == 0) {
+        free = true;
+        setExclusiveOwnerThread(null);
+    }
+    setState(c);
+    return free;
+}
+```
+唤醒线程
+```java
+//唤醒head节点的下一个节点
+//这个node是队列的head节点
+private void unparkSuccessor(Node node) {
+    /*
+     * If status is negative (i.e., possibly needing signal) try
+     * to clear in anticipation of signalling.  It is OK if this
+     * fails or if status is changed by waiting thread.
+     */
+    int ws = node.waitStatus;
+    if (ws < 0)
+        //将head节点的waitStatus状态置为0
+        compareAndSetWaitStatus(node, ws, 0);
+
+    /*
+     * Thread to unpark is held in successor, which is normally
+     * just the next node.  But if cancelled or apparently null,
+     * traverse backwards from tail to find the actual
+     * non-cancelled successor.
+     */
+    Node s = node.next;
+    if (s == null || s.waitStatus > 0) {
+        s = null;
+        for (Node t = tail; t != null && t != node; t = t.prev)
+            if (t.waitStatus <= 0)
+                s = t;
+    }
+    //唤醒head的下一个节点s
+    if (s != null)
+        LockSupport.unpark(s.thread);
+}
+```
+被唤醒的线程会在之前被阻塞的地方继续执行，即还是继续执行acquireQueued的自旋for循环中。
+### 对于ReentrantLock的公平锁和非公平锁
+### 非公平锁
+对于非公平锁的运行流程，假设现在有t1,t2,t3三个线程：假设t1已经获取到了锁，在t2和t3都去获取锁的时候，都会先去尝试修改state的值(即先去
+获取锁，而不是先去加入到等待队列)，如果先获取锁失败了，那么就执行 `acquire` 方法，实际执行的是 `nonfairTryAcquire` 方法，加锁失败则
+加入到队列中，加锁成功则继续线程接下来的逻辑。  
+当t1释放锁，唤醒了t2，t2通过`tryAcquire`方法借助CAS去修改state的值，在此时，t3也过来也通过`tryAcquire`方法修改state的值。如果t3修
+改state成功了，那么t3就获取到了锁资源，t2仍然在队列中等待，这就是非公平锁的体现。  
+非公平锁在最坏的情况下会出现线程饥饿的情况，可能有点线程永远得不到唤醒。非公平锁的效率比公平锁的效率要高。
+### 公平锁
+对于公平锁，它单独重新实现了 `tryAcqurie` 方法，无论是在队列中的数据还是新来的线程，具体代码如下，和非公平锁的加锁逻辑有些许不同
+```java
+protected final boolean tryAcquire(int acquires) {
+    final Thread current = Thread.currentThread();
+    int c = getState();
+    if (c == 0) {
+        //这里相比较于非公平锁多了一个hasQueuedPredecessors的判断
+        if (!hasQueuedPredecessors() &&
+            compareAndSetState(0, acquires)) {
+            setExclusiveOwnerThread(current);
+            return true;
+        }
+    }
+    else if (current == getExclusiveOwnerThread()) {
+        int nextc = c + acquires;
+        if (nextc < 0)
+            throw new Error("Maximum lock count exceeded");
+        setState(nextc);
+        return true;
+    }
+    return false;
+}
+```
+hasQueuedPredecessors方法是用来判断AQS等待队列中是否存在元素，如果有其他等待的线程，那么当前线程会被加入到等待队列的尾部，做到真正的
+先来后到，有序加锁。 `hasQueuedPredecessors` 方法的代码如下：
+```java
+//返回false代表队列中没有节点或者仅有一个节点是当前线程创建的节点。返回true则代表队列中存在等待节点，当前线程需要入队等待。
+public final boolean hasQueuedPredecessors() {
+    // The correctness of this depends on head being initialized
+    // before tail and on head.next being accurate if the current
+    // thread is first in queue.
+    Node t = tail; // Read fields in reverse initialization order
+    Node h = head;
+    Node s;
+    return h != t &&
+        ((s = h.next) == null || s.thread != Thread.currentThread());
+}
+```
+先判断head是否等于tail，如果队列中只有一个Node节点，那么head会等于tail，接着判断head的后置节点，这里肯定会是null，如果此Node节点对
+应的线程和当前的线程是同一个线程，那么则会返回false，代表没有等待节点或者等待节点就是当前线程创建的Node节点。此时当前线程会尝试获取锁。
+
+如果head和tail不相等，说明队列中有等待线程创建的节点，此时直接返回true，如果只有一个节点，而此节点的线程和当前线程不一致，也会返回true
+### 非公平锁和公平锁的区别
+非公平锁和公平锁的区别：非公平锁性能高于公平锁性能。非公平锁可以减少CPU唤醒线程的开销，整体的吞吐效率会高点，CPU也不必取唤醒所有线程，
+会减少唤起线程的数量
+
+非公平锁性能虽然优于公平锁，但是会存在导致线程饥饿的情况。在最坏的情况下，可能存在某个线程一直获取不到锁。不过相比性能而言，饥饿问题可以
+暂时忽略，这可能就是ReentrantLock默认创建非公平锁的原因之一了。
+## Condition
+Condition是在java 1.5中才出现的，它用来替代传统的Object的`wait()`、`notify()`实现线程间的协作，相比使用Object的`wait()`、`notify()`，
+使用Condition中的`await()`、`signal()`这种方式实现线程间协作更加安全和高效。因此通常来说比较推荐使用Condition
+
+其中AbstractQueueSynchronizer中实现了Condition中的方法，主要对外提供await(Object.wait())和signal(Object.notify())调用。
+### await
+```java
+public final void await() throws InterruptedException {
+    if (Thread.interrupted())
+        throw new InterruptedException();
+    //将当前线程加入到Condition队列中
+    //Condition队列和AQS的阻塞队列是两个独立的队列
+    Node node = addConditionWaiter();
+    int savedState = fullyRelease(node);
+    int interruptMode = 0;
+    while (!isOnSyncQueue(node)) {
+        //挂起该节点
+        LockSupport.park(this);
+        if ((interruptMode = checkInterruptWhileWaiting(node)) != 0)
+            break;
+    }
+    if (acquireQueued(node, savedState) && interruptMode != THROW_IE)
+        interruptMode = REINTERRUPT;
+    if (node.nextWaiter != null) // clean up if cancelled
+        unlinkCancelledWaiters();
+    if (interruptMode != 0)
+        reportInterruptAfterWait(interruptMode);
+}
+```
+```java
+private Node addConditionWaiter() {
+    Node t = lastWaiter;
+    // If lastWaiter is cancelled, clean out.
+    if (t != null && t.waitStatus != Node.CONDITION) {
+        unlinkCancelledWaiters();
+        t = lastWaiter;
+    }
+    //将当前线程封装成一个Node节点，并且该Node的模式为CONDITION
+    Node node = new Node(Thread.currentThread(), Node.CONDITION);
+    if (t == null)
+        firstWaiter = node;
+    else
+        t.nextWaiter = node;
+    lastWaiter = node;
+    return node;
 }
 ```
