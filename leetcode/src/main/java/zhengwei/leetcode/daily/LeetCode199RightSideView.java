@@ -9,17 +9,6 @@ import java.util.*;
  * @since 2020/4/22 9:23
  */
 public class LeetCode199RightSideView {
-    //二叉树节点
-    private static final class TreeNode {
-        int val;
-        TreeNode left;
-        TreeNode right;
-
-        public TreeNode(int val) {
-            this.val = val;
-        }
-    }
-
     /**
      * bfs
      * 广度优先遍历，记录每一层的最后一个元素</p>

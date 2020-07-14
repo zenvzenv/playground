@@ -7,16 +7,6 @@ package zhengwei.leetcode.daily;
  * @since 2020/5/7 14:09
  */
 public class LeetCode572IsSubtree {
-    private static final class TreeNode {
-        int val;
-        TreeNode left;
-        TreeNode right;
-
-        public TreeNode(int val) {
-            this.val = val;
-        }
-    }
-
     private static boolean isSubtree(TreeNode s, TreeNode t) {
         //如果两个树相同，那么t肯定是s的子树
         //s的左右子树是否和t相同

@@ -7,16 +7,6 @@ package zhengwei.leetcode.daily;
  * @since 2020/5/5 9:23
  */
 public class LeetCode98IsValidBST {
-    private static final class TreeNode {
-        int val;
-        TreeNode left;
-        TreeNode right;
-
-        public TreeNode(int val) {
-            this.val = val;
-        }
-    }
-
     private static boolean isValidBST(TreeNode root) {
         return helper(root, null, null);
     }
