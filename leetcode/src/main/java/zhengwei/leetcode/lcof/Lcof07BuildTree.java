@@ -1,4 +1,4 @@
-package zhengwei.leetcode.swordfingeroffer;
+package zhengwei.leetcode.lcof;
 
 import java.util.Arrays;
 
@@ -9,17 +9,7 @@ import java.util.Arrays;
  * @author zhengwei AKA Awei
  * @since 2020/6/6 14:01
  */
-public class Lcof07buildTree {
-    private static final class TreeNode {
-        int val;
-        TreeNode left;
-        TreeNode right;
-
-        TreeNode(int x) {
-            val = x;
-        }
-    }
-
+public class Lcof07BuildTree {
     public TreeNode buildTree(int[] preorder, int[] inorder) {
         int length = inorder.length;
         if (preorder.length == 0 || length == 0) {

@@ -1,4 +1,4 @@
-package zhengwei.leetcode.swordfingeroffer;
+package zhengwei.leetcode.lcof;
 
 import java.util.Arrays;
 

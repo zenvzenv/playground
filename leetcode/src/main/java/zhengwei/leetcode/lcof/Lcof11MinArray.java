@@ -1,4 +1,4 @@
-package zhengwei.leetcode.swordfingeroffer;
+package zhengwei.leetcode.lcof;
 
 /**
  * 剑指offer第11题：旋转数组中的最小数字
