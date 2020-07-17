@@ -1,4 +1,4 @@
-package zhengwei.leetcode.swordfingeroffer;
+package zhengwei.leetcode.lcof;
 
 /**
  * 剑指offer第18题：删除链表的节点
