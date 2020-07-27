@@ -1,4 +1,4 @@
-package zhengwei.leetcode.swordfingeroffer;
+package zhengwei.leetcode.lcof;
 
 /**
  * 刷题需要用到的公用对象
