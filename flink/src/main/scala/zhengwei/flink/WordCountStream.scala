@@ -1,13 +1,15 @@
 package zhengwei.flink
 
+import org.apache.flink.api.java.utils.ParameterTool
 import org.apache.flink.streaming.api.scala._
 
 object WordCountStream {
   def main(args: Array[String]): Unit = {
     //执行环境
     val env = StreamExecutionEnvironment.getExecutionEnvironment
+    val parameterTool = ParameterTool.fromArgs(args)
     //接受一个socket文本
-    val dataStream = env.socketTextStream("localhost", 8888)
+    val dataStream = env.socketTextStream(parameterTool.get("host"), parameterTool.getInt("port"))
     //每条数据进程处理
     dataStream.flatMap(_.split("[ ]"))
       .filter(_.nonEmpty)
