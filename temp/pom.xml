@@ -10,13 +10,4 @@
     <modelVersion>4.0.0</modelVersion>
 
     <artifactId>temp</artifactId>
-
-    <dependencies>
-        <dependency>
-            <artifactId>judge-degrade</artifactId>
-            <groupId>ai.c3.iot</groupId>
-            <version>0.0.2-SNAPSHOT</version>
-        </dependency>
-    </dependencies>
-
 </project>
