@@ -1,4 +1,4 @@
-package zhengwei.leetcode.swordfingeroffer;
+package zhengwei.leetcode.lcof;
 
 /**
  * @author zhengwei AKA Awei
