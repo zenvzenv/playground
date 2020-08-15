@@ -1,7 +1,5 @@
 package zhengwei.util.common;
 
-import org.apache.commons.lang3.StringUtils;
-
 import java.util.regex.Pattern;
 
 /**
@@ -175,7 +173,7 @@ public final class IpUtil {
 //		System.out.println(ipinfo);
         for (int i = 0; i < 4; i++) {
             try {
-                String s = StringUtils.splitPreserveAllTokens(ipinfo, ".")[i];
+                String s = ipinfo.split("[.]")[i];
                 ipArray[i] = Integer.parseInt(s);
             } catch (NumberFormatException e) {
                 String ip = ipinfo.replaceAll("\n", "");

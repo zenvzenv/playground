@@ -23,16 +23,19 @@ import java.util.List;
  * 2. 使用直接指针的方式
  * 即在栈帧中的reference所指向的是真正的实例对象，并且队中的对象还会指向元数据区的地址
  * <p>
- * 本案例中使用的JVM参数：-Xms5m -Xmx5m -XX:+HeapDumpOnOutOfMemoryError
+ * 本案例中使用的JVM参数：
+ * 设置堆的最小大小：-Xms5m
+ * 设置堆的最大大小：-Xmx5m
+ * 设置堆出现溢出时转储文件：-XX:+HeapDumpOnOutOfMemoryError
  *
  * @author zhengwei AKA Awei
  * @since 2019/12/30 10:31
  */
-public class MemorySpace {
+public class HeapOutOfMemory {
     public static void main(String[] args) {
-        List<MemorySpace> list = new ArrayList<>();
+        List<HeapOutOfMemory> list = new ArrayList<>();
         while (true) {
-            list.add(new MemorySpace());
+            list.add(new HeapOutOfMemory());
             //添加gc之后，将不会出现OOM错误
             //显示调用JVM的gc，JVM会尝试进行一次gc
             System.gc();
