@@ -1,6 +1,5 @@
 package zhengwei.thread.semaphore;
 
-import org.apache.spark.sql.catalyst.expressions.aggregate.Collect;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collection;

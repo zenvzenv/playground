@@ -2,7 +2,7 @@ package zhengwei.spark.accumulator;
 
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.util.AccumulatorV2;
-import zhengwei.util.common.SparkUtils;
+import zhengwei.spark.common.SparkUtils;
 
 import java.io.Serializable;
 import java.util.Arrays;

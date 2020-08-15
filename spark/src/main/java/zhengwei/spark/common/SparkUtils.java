@@ -1,4 +1,4 @@
-package zhengwei.util.common;
+package zhengwei.spark.common;
 
 import org.apache.spark.SparkContext;
 import org.apache.spark.api.java.JavaSparkContext;
@@ -13,9 +13,9 @@ import org.apache.spark.sql.SparkSession;
 public enum SparkUtils {
     INSTANCE;
 
-    private JavaSparkContext jsc;
+    private final JavaSparkContext jsc;
 
-    private SparkSession session;
+    private final SparkSession session;
 
     SparkUtils() {
         session = SparkSession.builder()

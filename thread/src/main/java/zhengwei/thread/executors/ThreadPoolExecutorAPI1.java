@@ -11,8 +11,8 @@ import java.util.concurrent.*;
  */
 public class ThreadPoolExecutorAPI1 {
     public static void main(String[] args) throws ExecutionException, InterruptedException {
-//        testInvokeAny();
-        testInvokeAll();
+        testInvokeAny();
+//        testInvokeAll();
 //        testSubmit();
     }
 
@@ -25,9 +25,11 @@ public class ThreadPoolExecutorAPI1 {
         List<Callable<Integer>> tasks = new ArrayList<>();
         for (int i = 0; i < 10; i++) {
             tasks.add(() -> {
+                System.out.println("start");
                 final int random = ThreadLocalRandom.current().nextInt(10);
                 TimeUnit.SECONDS.sleep(random);
-                System.out.println(random);
+//                System.out.println(random);
+                System.out.println("end");
                 return random;
             });
         }
