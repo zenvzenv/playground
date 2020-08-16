@@ -1,6 +1,6 @@
-# Hadoop专栏
-## 一、yarn(资源调度器)
-### 1.Resource Manager(简称为RM)
+# YARN(Yet Another Resource Negotiator)
+## 组件
+### Resource Manager(简称为RM)
 1. Resource Manager中包含两个组件
     1. Application Manager(简称为AM)，应用程序管理器
         * AM主要负责接受client端发送的job请求，为应用开启一个Container(资源池)，来运行我们的Application Master
@@ -20,7 +20,7 @@
             1. 容器调度器
             2. 公平调度器
             3. 队列调度器
-### 2. Node Manager(简称NM)
+### Node Manager(简称NM)
 1. NodeManager是一个JVM进程运行在集群中的节点上，每个节点都会有自己的NodeManager
 2. NM是一个salve进程，它负责接收ResourceManager的资源分配请求，分配具体的Container给应用。
 3. 同时，它还负责监控并报告Container使用信息给ResourceManager。
@@ -33,7 +33,7 @@
 - 管理每个节点上的日志
 - 执行Yarn上面应用的一些额外的服务，比如MapReduce的shuffle过程
 ```
-### 2. Container
+### Container
 1. Container是Yarn框架中的计算单元，是具体执行Task的基本单位。
 2. Container与集群节点的关系是：一个节点会允许多个Container，但一个Container不能跨节点
 3. 一个Container就是一组计算资源的抽象，它包含
