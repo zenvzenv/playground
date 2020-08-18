@@ -34,28 +34,51 @@ package zhengwei.leetcode.daily;
  * @since 2019/7/19 20:00
  */
 public class LeetCode06ZigzagConvert {
-	public String convert(String s, int numRows) {
-		char[] chars = s.toCharArray();
-		int length = chars.length;
-		//横向Z字
-		StringBuilder[] sb = new StringBuilder[numRows];
-		for (int index = 0; index < numRows; index++) {
-			sb[index] = new StringBuilder();
-		}
-		int i = 0;
-		while (i < length) {
-			//对于Z字上边的一横，需要全部遍历
-			for (int index = 0; index < numRows && i < length; index++) {
-				sb[index].append(chars[i++]);
-			}
-			//对于Z字的斜线只需要去头和去尾的长度即可
-			for (int index = numRows - 2; index > 0 && i < length; index--) {
-				sb[index].append(chars[i++]);
-			}
-		}
-		for (int index = 1; index < numRows; index++) {
-			sb[0].append(sb[index]);
-		}
-		return sb[0].toString();
-	}
+    public String convert(String s, int numRows) {
+        char[] chars = s.toCharArray();
+        int length = chars.length;
+        //横向Z字
+        StringBuilder[] sb = new StringBuilder[numRows];
+        for (int index = 0; index < numRows; index++) {
+            sb[index] = new StringBuilder();
+        }
+        int i = 0;
+        while (i < length) {
+            //对于Z字上边的一横，需要全部遍历
+            for (int index = 0; index < numRows && i < length; index++) {
+                sb[index].append(chars[i++]);
+            }
+            //对于Z字的斜线只需要去头和去尾的长度即可
+            for (int index = numRows - 2; index > 0 && i < length; index--) {
+                sb[index].append(chars[i++]);
+            }
+        }
+        for (int index = 1; index < numRows; index++) {
+            sb[0].append(sb[index]);
+        }
+        return sb[0].toString();
+    }
+
+    public static String convert2(String s, int numRows) {
+        if (numRows < 2) return s;
+        StringBuilder[] sbs = new StringBuilder[numRows];
+        for (int i = 0; i < numRows; i++) {
+            sbs[i] = new StringBuilder();
+        }
+        int index = 0, flag = -1;
+        for (int i = 0; i < s.length(); i++) {
+            sbs[index].append(s.charAt(i));
+            if (0 == index || index == numRows - 1) flag = -flag;
+            index += flag;
+        }
+        StringBuilder res = new StringBuilder();
+        for (int i = 0; i < numRows; i++) {
+            res.append(sbs[i]);
+        }
+        return res.toString();
+    }
+
+    public static void main(String[] args) {
+        System.out.println(convert2("PAYPALISHIRING", 3));
+    }
 }
