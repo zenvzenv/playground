@@ -517,7 +517,9 @@ private[spark] def cleaner: Option[ContextCleaner] = _cleaner
 private[spark] def  : AppStatusStore = _statusStore
 ```
 ##### org.apache.spark.SparkConf
-它其实算不上是SparkContext的一个初始化组件，因为它是构造SparkContext的时候传进来的。SparkContext会将传入的SparkConf克隆一份副本，之后会在副本上做校验(主要是AppName和Master的校验)，及添加其他必要参数(Dirver地址、应用ID等)。这样用户就不可以在修改配置项，以保证SparkConf在运行期的不变性。
+它其实算不上是SparkContext的一个初始化组件，因为它是构造SparkContext的时候传进来的。SparkContext会将传入的SparkConf克隆一份副本，
+之后会在副本上做校验(主要是AppName和Master的校验)，及添加其他必要参数(Driver地址、应用ID等)。这样用户就不可以在修改配置项，
+以保证SparkConf在运行期的不变性。
 ##### org.apache.spark.scheduler.LiveListenerBus
 它是SparkContext中的事件总线，它异步的将事件源产生的事件( `org.apache.spark.scheduler.SparkListenerEvent` )投递给已经注册的监听器( `org.apache.spark.scheduler.SparkListener` ).Spark中广泛运用监听器模式，以适应集群状态下的分布式事件汇报。<br/>
 除了LiveListenerBus之外，Spark中还有很多事件总线，它们都继承自 `org.apache.spark.util.ListenerBus` 特质，事件总线式Spark底层重要的支撑组件。<br/>
@@ -2467,7 +2469,8 @@ TransportConf和TransportContext提供底层的基于Netty的RPC机制，Transpo
         zhengwei3--[22, 30]
         zhengwei2--[20, 25]
         ```
-    15. cache()算子：缓存RDD算子，懒加载，不会生成 "新的" RDD，所生成的RDD只是对原RDD的引用，如果要**缓存的数据大于实际的内存的话，Spark只是会缓存一部分到内存，缓存一部分到磁盘中，cache是不会切断RDD的血统关系的**
+    15. cache()算子：缓存RDD算子，懒加载，不会生成 "新的" RDD，所生成的RDD只是对原RDD的引用，如果要**缓存的数据大于实际的内存的话，
+    Spark只是会缓存一部分到内存，缓存一部分到磁盘中，cache是不会切断RDD的血统关系的**
         unpersist()算子，取消缓存
         ```java 
         JavaRDD<String> cache = rdd1.cache();
