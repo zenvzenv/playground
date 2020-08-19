@@ -20,6 +20,7 @@
         <module>flink</module>
         <module>java</module>
         <module>leetcode</module>
+        <module>collection</module>
         <module>hadoop</module>
     </modules>
 
