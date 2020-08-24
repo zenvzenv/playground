@@ -22,7 +22,7 @@ val observedSizes = rdd.map(_ => bdata.value.size)
 2. 广播变量是只读变量，不要对其进行修改
 3. 不要去broadcast一个RDD，因为广播RDD的作用
 ## Broadcast的实现方式
-### 分发task的时候先分发broadcast data的原信息
+### 分发task的时候先分发broadcast data的元信息
 1. Driver在本地创建一个文件夹，这个文件夹用来存放broadcast的data，并启动一个可以访问该文件夹的HttpServer
 2. 当调用 `val bdata = sc.broadcast(data)` 时将data写入文件夹，同时写入自己的blockManager(StorageLevel为MEMORY_AND_DISK)，
 获得一个blockId(BroadcastBlockId)
@@ -55,7 +55,7 @@ HttpBroadcast 最大的问题就是 **driver 所在的节点可能会出现网�
 随着 fetch 的 executor 越来越多，有更多的 data server 加入，data 就很快能传播到全部的 executor 那里去了。TorrentBroadcast使用
 blockManager.getRemote()=> NIO ConnectionManager 传数据的方法来传递,读取数据的过程与读取 cached rdd 的方式类似
 ##### 细节
-###### Dirver
+###### Driver
 1. Driver 先把 data 序列化到 byteArray，然后切割成 BLOCK_SIZE（由 `spark.broadcast.blockSize` = 4MB 设置）大小的 data block，
 每个 data block 被 TorrentBlock 对象持有。
 2. 切割完 byteArray 后，会将其回收，因此内存消耗虽然可以达到 2 * Size(data)，但这是暂时的。
@@ -69,8 +69,8 @@ blockManager.getRemote()=> NIO ConnectionManager 传数据的方法来传递,读
 1. executor 收到 serialized task 后，先反序列化 task，这时候会反序列化 serialized task 中包含的 bdata 类型是 TorrentBroadcast，
 也就是去调用 TorrentBroadcast.readObject()。
 2. 这个方法首先得到 bdata 对象，然后发现 bdata 里面没有包含实际的 data。怎么办？
-    1. 先询问所在的 executor 里的 blockManager 是会否包含 data（通过查询 data 的 broadcastId），包含就直接从本地 blockManager 读取 data。
-    2. 否则，就通过本地 blockManager 去连接 driver 的 blockManagerMaster 获取 data 分块的 meta 信息，获取信息后，就开始了 BT 过程。
+    1. 先询问所在的executor里的blockManager 是会否包含data(通过查询data的broadcastId)，包含就直接从本地 blockManager读取data。
+    2. 否则，就通过本地blockManager去连接driver的blockManagerMaster获取data分块的meta信息，获取信息后，就开始了BT过程。
 
 **BT过程：**
 1. task 先在本地开一个数组用于存放将要 fetch 过来的 data blocks `arrayOfBlocks = new Array[TorrentBlock](totalBlocks)`，
@@ -82,7 +82,7 @@ TorrentBlock 是对 data block 的包装
 4. fetch 的过程就是通过 
 “本地 blockManager->本地 connectionManager->driver/executor 的 connectionManager->driver/executor 的 blockManager->data” 
 得到 data，这个过程与 fetch cached rdd 类似。
-5. **每 fetch 到一个 block 就将其存放到 executor 的 blockManager 里面，同时通知 driver 上的 blockManagerMaster 说该 data block 多了一个存储地址。**
+5. **每fetch到一个block就将其存放到executor的blockManager里面，同时通知driver上的blockManagerMaster说该data block多了一个存储地址。**
 6. 这一步通知非常重要，意味着 blockManagerMaster 知道 data block 现在在 cluster 中有多份，
 下一个不同节点上的 task 再去 fetch 这个 data block 的时候，可以有两个选择了，而且会随机选择一个去 fetch。
 7. 这个过程持续下去就是 BT 协议，随着下载的客户端越来越多，data block 服务器也越来越多，就变成 p2p下载了。
@@ -94,10 +94,11 @@ TorrentBlock 是对 data block 的包装
 对于 Spark 来讲，broadcast 时考虑的不仅是如何将公共 data 分发下去的问题，还要考虑如何让同一节点上的 task 共享 data。
 
 对于第一个问题，Spark 设计了两种 broadcast 的方式，传统存在单点瓶颈问题的 HttpBroadcast，和类似 BT 方式的 TorrentBroadcast。
-HttpBroadcast 使用传统的 client-server 形式的 HttpServer 来传递真正的 data，而 TorrentBroadcast 使用 blockManager 自带的 NIO 通信方式来传递 data。
-**TorrentBroadcast 存在的问题是慢启动和占内存**，慢启动指的是刚开始 data 只在 driver 上有，要等 executors fetch 很多轮 data block 后，
-data server 才会变得可观，后面的 fetch 速度才会变快。executor 所占内存的在 fetch 完 data blocks 后进行反序列化时需要将近两倍 data size 的内存消耗。
-不管哪一种方式，driver 在分块时会有两倍 data size 的内存消耗。
+HttpBroadcast 使用传统的 client-server 形式的 HttpServer 来传递真正的 data，而 TorrentBroadcast 使用 blockManager 自带的 NIO 
+通信方式来传递 data。
+**TorrentBroadcast 存在的问题是慢启动和占内存**，慢启动指的是刚开始data只在driver上有，要等executors fetch很多轮 data block后，
+data server才会变得可观，后面的fetch速度才会变快。executor所占内存的在fetch完data blocks后进行反序列化时需要将近两倍data size的
+内存消耗。不管哪一种方式，driver 在分块时会有两倍 data size 的内存消耗。
 
-对于第二个问题，每个 executor 都包含一个 blockManager 用来管理存放在 executor 里的数据，将公共数据存放在 blockManager 中(StorageLevel 为内存(Storage)＋磁盘)，
-可以保证在 executor 执行的 tasks 能够共享 data。
+对于第二个问题，每个executor都包含一个blockManager用来管理存放在executor里的数据，将公共数据存放在blockManager中
+(StorageLevel 为内存(Storage)＋磁盘)，可以保证在 executor 执行的tasks 能够共享data。
