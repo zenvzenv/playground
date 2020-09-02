@@ -204,8 +204,13 @@ mergeHeap顾名思义就是使用堆排序不断提取出hash(firstRecord.Key)�
 
 整个 insert-merge-aggregate 的过程有三点需要进一步探讨一下：
 * 内存剩余空间检测
-为此，executor专门持有一ShuffleMemoryMap:HashMap[threadId, occupiedMemory]来监控每个reducer中ExternalOnlyAppendMap占用的内存量。
-每当 AppendOnlyMap 要扩展时，都会计算ShuffleMemroyMap持有的所有reducer 中的AppendOnlyMap已占用的内存+扩展后的内存是会否会大于内存限制，
+Spark也规定executor中，
+1. 在Spark1.6之前采用的是静态内存管理，`spark.shuffle.memoryFraction * spark.shuffle.safetyFraction`的空间(默认是0.3 * 0.8)
+可用于ExternalOnlyAppendMap。
+2. 在Spark1.6之后采用的统一内存管理， `Usable * (1 - spark.strorage.storageFraction)` 的空间，
+默认(Java heap - 300M * 0.6 * 0.5) 可用于ExternalOnlyAppendMap。
+为此，executor专门持有一ShuffleMemoryMap:HashMap\[threadId, occupiedMemory]来监控每个reducer中ExternalOnlyAppendMap占用的内存量。
+每当AppendOnlyMap要扩展时，都会计算ShuffleMemoryMap持有的所有reducer中的AppendOnlyMap已占用的内存+扩展后的内存是会否会大于内存限制，
 大于就会将AppendOnlyMap spill到磁盘。有一点需要注意的是前1000个records进入AppendOnlyMap的时候不会启动是否要spill的检查，
 需要扩展时就直接在内存中扩展。
 * AppendOnlyMap 大小估计
