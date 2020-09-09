@@ -9,6 +9,12 @@ hdfs dfs -cat hdfs://cmhcluster/user/bdoc/10/services/hdfs/37/analyze/enhance/lt
 hdfs dfs -cat /user/asiainfo/ys_data/cmnet/lw_jk/JK_100_2019032620*|awk -F ' ' '{total+=$23;sum+=$24} END{print total/1024/1024/1024,sum/1024/1024/1024}'
 #spark提交样例Pi命令
 spark-submit --class org.apache.spark.examples.JavaSparkPi --master yarn-client ${SPARK_HOME}/jars/spark-examples_2.11-2.2.0-cdh6.0.1.jar 10
+./bin/spark-submit \
+--class org.apache.spark.examples.JavaSparkPi \
+--queue yaxin \
+--master yarn \
+--deploy-mode client \
+examples/jars/spark-examples_2.11-2.3.2.3.1.4.0-315.jar 10
 #获取yarn运行日志
 yarn log -applicationId xxx
 #获取正在运行的application
@@ -79,3 +85,20 @@ grep -v '*' | awk -F '\^' \
 sort -u > ~/zhengwei/tracepreprocess/data/name.txt
 
 hcat hdfs://cmhcluster/user/bdoc/10/services/hdfs/37/hive/it_lac_sign_15m/2019/11/04/00/*|awk -F'\1' '{if($3!=0 && $4!=0) lacci[$3"_"$4]+=1} END{for(i in lacci) {if(lacci[i]>4) printf "lacci->%s,count->%d\n",i,lacci[i]}}'
+
+/bin/cat ailk-common-statengine-ti-1-it_gb_sign_15m*.dat|awk -F'\1' '{arr[$1]++} END{OFS="\t";for(i in arr){print i,arr[i]}}'
+
+#跑Spark的PI样例程序
+/opt/cloudera/parcels/CDH-6.1.1-1.cdh6.1.1.p0.875250/bin/spark-submit \
+--master yarn \
+--deploy-mode client \
+--class org.apache.spark.examples.SparkPi \
+/opt/cloudera/parcels/CDH-6.1.1-1.cdh6.1.1.p0.875250/jars/spark-examples_2.11-2.4.0-cdh6.1.1.jar 10
+
+#设计shell叫白中的参数选项
+params=$(getopt -o d:t:c: -l delay:,type:,cycletime: -n "$0" -- "$@")
+#centos7+修改主机名
+hostnamectl set-hostname xxx
+
+#nc查看端口是否开启
+nc -znv -w 1 192.168.1.225 8020
