@@ -2,7 +2,7 @@
 jdk1.7中的LinkedHashMap相比较jdk1.8中的LinkedHashMap在数据结构上稍有不同
 ## 概述
 相比HashMap的无序存放key和value，LinkedHashMap中的key，value是有序的。LinkedHashMap通过维护一个**双向链表**来实现内部元素的有序性，
-该迭代顺序可以是**插入顺序(保证插入顺序)**和**读访问顺序(保证访问顺序)**，LinkedHashMap默认实现是按插入的顺序进行排序。  
+该迭代顺序可以是**插入顺序(保证插入顺序)**和**读访问顺序(保证访问顺序)**，LinkedHashMap**默认实现是按插入的顺序**进行排序。  
 本质上，HashMap和双向链表合二为一就组成了LinkedHashMap。所谓LinkedHashMap，其落脚点在HashMap，因此更准确地说，
 它是一个将所有Entry节点链入一个双向链表双向链表的HashMap。在LinkedHashMapMap中，所有put进来的Entry都保存在和HashMap一样的哈希表中，
 但由于它又额外定义了一个以head(head节点不存数据)为头结点的双向链表，因此对于每次put进来Entry，除了将其保存到哈希表中对应的位置上之外，
@@ -15,16 +15,16 @@ AbstractMap (java.util)
 ```
 ## 原理
 LinkedHashMap继承自HashMap，先看下HashMap的数据结构。如下图所示：  
-!(HashMap数据结构.jpg)[src\main\resources\image\HashMap数据结构.jpg]  
+!(HashMap数据结构.jpg)[jetbrains://idea/navigate/reference?project=playground&path=image/HashMap/HashMap数据结构.jpg]  
 LinkedHashMap在HashMap的基础上新加了一条双向链表，使得上面的结构可以保持键值对的插入顺序、同时可以通过链表进行相应的操作，实现了相关
 的访问顺序的逻辑。LinkedHashMap的数据结构如下所示：
-!(LinkedHashMap数据结构.jpg)[src\main\resources\image\LinkedHashMap数据结构.jpg]  
+!(LinkedHashMap数据结构.jpg)[jetbrains://idea/navigate/reference?project=playground&path=image/LinkedHashMap/LinkedHashMap数据结构.jpg]  
 淡蓝色箭头表示前驱引用，红色箭头表示后继引用，每当有新的节点插入时，新节点最终会接在`tail`引用指向的节点的后面，而`tail`指针则会指向
 新的节点，这样一个双向链表就建立起来了。  
 ## 源码分析
 ### Entry的继承体系
 Entry继承体系如下：  
-!(Entry继承体系.jpg)[src\main\resources\image\Entry继承体系.jpg]  
+!(Entry继承体系.jpg)[jetbrains://idea/navigate/reference?project=playground&path=image/LinkedHashMap/Entry继承体系.jpg]  
 上面的继承体系乍一看还是有点复杂的，同时也有点让人迷惑。HashMap 的内部类 TreeNode 不继承它的了一个内部类 Node，却继承自Node的子类
 LinkedHashMap内部类Entry。这里这样做是有一定原因的，这里先不说。先来简单说明一下上面的继承体系。LinkedHashMap 内部类 Entry 继承自
 HashMap 内部类 Node，并新增了两个引用，分别是 before 和 after。这两个引用的用途不难理解，也就是用于维护双向链表。同时，TreeNode 继
@@ -33,10 +33,10 @@ TreeNode 并不需要具备组成链表能力。如果继承 LinkedHashMap 内�
 简单说明一下这个问题（水平有限，不保证完全正确），这里这么做确实会浪费空间，但与 TreeNode 通过继承获取的组成链表的能力相比，
 这点浪费是值得的。在 HashMap 的设计思路注释中，有这样一段话：
 >Because TreeNodes are about twice the size of regular nodes, we
- use them only when bins contain enough nodes to warrant use
- (see TREEIFY_THRESHOLD). And when they become too small (due to
- removal or resizing) they are converted back to plain bins.  In
- usages with well-distributed user hashCodes, tree bins are rarely used.
+>use them only when bins contain enough nodes to warrant use
+>(see TREEIFY_THRESHOLD). And when they become too small (due to
+>removal or resizing) they are converted back to plain bins.  In
+>usages with well-distributed user hashCodes, tree bins are rarely used.
 
 大致的意思是 TreeNode 对象的大小约是普通 Node 对象的2倍，我们仅在桶（bin）中包含足够多的节点时再使用。当桶中的节点数量变少时
 (取决于删除和扩容) TreeNode 会被转成 Node。当用户实现的 hashCode 方法具有良好分布性时，树类型的桶将会很少被使用。  
