@@ -237,7 +237,8 @@ final V putVal(K key, V value, boolean onlyIfAbsent) {
     int binCount = 0;
     //进入自旋
     for (Node<K,V>[] tab = table;;) {
-        //fh代表节点f的hash值，hash大于的节点一定是链表节点
+        //f是当前桶的第一个元素
+        //fh代表节点f的hash值，hash大于0的节点一定是链表节点
         Node<K,V> f; int n, i, fh;
         //如果table还没有被初始化
         if (tab == null || (n = tab.length) == 0)
@@ -262,6 +263,8 @@ final V putVal(K key, V value, boolean onlyIfAbsent) {
             synchronized (f) {
                 //取出桶中的元素进行二次比较
                 if (tabAt(tab, i) == f) {
+                    //取出来的元素的hash值大于0，当转换为树之后，hash值为-2
+                    //只有链表节点的hash值是大于等于0的
                     if (fh >= 0) {
                         //链表元素个数加一
                         binCount = 1;
@@ -279,7 +282,7 @@ final V putVal(K key, V value, boolean onlyIfAbsent) {
                                 break;
                             }
                             Node<K,V> pred = e;
-                            //如果当前节点的下一个节点为空，那么就把d
+                            //如果当前节点的下一个节点为空，说明此节点为最后一个节点，将要插入的节点插到链表的尾部即可
                             if ((e = e.next) == null) {
                                 pred.next = new Node<K,V>(hash, key,
                                                           value, null);
@@ -287,9 +290,11 @@ final V putVal(K key, V value, boolean onlyIfAbsent) {
                             }
                         }
                     }
+                    //如果当前节点是树节点
                     else if (f instanceof TreeBin) {
                         Node<K,V> p;
                         binCount = 2;
+                        //调用红黑树的putVal方法进行value插入
                         if ((p = ((TreeBin<K,V>)f).putTreeVal(hash, key,
                                                        value)) != null) {
                             oldVal = p.val;
@@ -300,7 +305,11 @@ final V putVal(K key, V value, boolean onlyIfAbsent) {
                 }
             }
             if (binCount != 0) {
+                //判断链表中元素个数是否大于转树的阈值
                 if (binCount >= TREEIFY_THRESHOLD)
+                    //链表转成红黑树
+                    //但是链表转成红黑树还有一个条件，那就是table的长度**大于等于**64
+                    //如果table的长度小于64，则先尝试扩容
                     treeifyBin(tab, i);
                 if (oldVal != null)
                     return oldVal;
@@ -308,15 +317,111 @@ final V putVal(K key, V value, boolean onlyIfAbsent) {
             }
         }
     }
+    //计算当前ConcurrentHashMap中的元素个数
     addCount(1L, binCount);
     return null;
 }
 ```
 对当前的table进行无条件**自旋**直到put成功，put过程总结如下：
 1. 如果table还未初始化，那么就调用initTable进行初始化
-2. 如果没有hash冲突就CAS插入元素
-3. 如果还在进行扩容，那么就协助扩容
-4. 如果存在hash冲突，那么就使用synchronized来确保线程安全，这里有两种情况，一种是链表形式就直接遍历到链表尾部插入，如果是树形结构的话
-就按红黑树规则插入
+2. 计算key的hash值以确定key所在桶的位置
+3. 如果该桶还没有元素那么就利用CAS直接插入元素
+3. 如果该桶以存在元素，则查看该桶上的元素的hash值，如果是MOVED(-1)的话，则说明table正在进行扩容，那么就协助扩容
+4. 如果存在hash冲突，table也没有在扩容的话，那么就使用synchronized锁住头节点来确保线程安全，这里有两种情况，
+一种是链表形式就直接遍历链表，比较链表中的每个元素的key的hash和equal方法，如果相同则说明是同一个key，那么就覆盖旧值，否则插入到链表的
+尾部；如果是树形结构的话就按红黑树规则插入
 5. 如果某一个链表中的元素个数超过了8，并且table的长度超过了64，就将链表转换成树节点
 6. 最后调用addCount去计算map中的元素个数，并检测是否需要扩容
+## 扩容
+在put方法的详解中，我们可以看到，在同一个节点的个数超过8个的时候，会调用 treeifyBin 方法来看看是扩容还是转化为一棵树
+
+同时在每次添加完元素的addCount方法中，也会判断当前数组中的元素是否达到了sizeCtl的量，如果达到了的话，则会进入transfer方法去扩容.
+
+treeifyBin源码
+```java
+/**
+ * Replaces all linked nodes in bin at given index unless table is
+ * too small, in which case resizes instead.
+ * 当数组长度小于64的时候，扩张数组长度一倍，否则的话把链表转为树
+ */
+private final void treeifyBin(Node<K,V>[] tab, int index) {
+    Node<K,V> b; int n, sc;
+    if (tab != null) {
+        //MIN_TREEIFY_CAPACITY = 64
+        if ((n = tab.length) < MIN_TREEIFY_CAPACITY)
+            //尝试扩容
+            tryPresize(n << 1);
+        //如果table的长度超过64并且链表长度超过8则将链表树化
+        else if ((b = tabAt(tab, index)) != null && b.hash >= 0) {
+            //b为桶中的头节点，锁住头节点以保证线程安全
+            synchronized (b) {
+                if (tabAt(tab, index) == b) {
+                    TreeNode<K,V> hd = null, tl = null;
+                    for (Node<K,V> e = b; e != null; e = e.next) {
+                        TreeNode<K,V> p =
+                            new TreeNode<K,V>(e.hash, e.key, e.val,
+                                              null, null);
+                        //树的头节点还在原来的位置上
+                        if ((p.prev = tl) == null)
+                            hd = p;
+                        else
+                            tl.next = p;
+                        tl = p;
+                    }
+                    //把TreeNode的链表放入容器TreeBin中
+                    setTabAt(tab, index, new TreeBin<K,V>(hd));
+                }
+            }
+        }
+    }
+}
+```
+
+tryPresize源码
+```java
+/*
+ * Tries to presize table to accommodate the given number of elements.
+ *
+ * @param size number of elements (doesn't need to be perfectly accurate)
+ */
+private final void tryPresize(int size) {
+    int c = (size >= (MAXIMUM_CAPACITY >>> 1)) ? MAXIMUM_CAPACITY :
+        tableSizeFor(size + (size >>> 1) + 1);
+    int sc;
+    while ((sc = sizeCtl) >= 0) {
+        Node<K,V>[] tab = table; int n;
+        if (tab == null || (n = tab.length) == 0) {
+            n = (sc > c) ? sc : c;
+            if (U.compareAndSwapInt(this, SIZECTL, sc, -1)) {
+                try {
+                    if (table == tab) {
+                        @SuppressWarnings("unchecked")
+                        Node<K,V>[] nt = (Node<K,V>[])new Node<?,?>[n];
+                        table = nt;
+                        sc = n - (n >>> 2);
+                    }
+                } finally {
+                    sizeCtl = sc;
+                }
+            }
+        }
+        else if (c <= sc || n >= MAXIMUM_CAPACITY)
+            break;
+        else if (tab == table) {
+            int rs = resizeStamp(n);
+            if (sc < 0) {
+                Node<K,V>[] nt;
+                if ((sc >>> RESIZE_STAMP_SHIFT) != rs || sc == rs + 1 ||
+                    sc == rs + MAX_RESIZERS || (nt = nextTable) == null ||
+                    transferIndex <= 0)
+                    break;
+                if (U.compareAndSwapInt(this, SIZECTL, sc, sc + 1))
+                    transfer(tab, nt);
+            }
+            else if (U.compareAndSwapInt(this, SIZECTL, sc,
+                                         (rs << RESIZE_STAMP_SHIFT) + 2))
+                transfer(tab, null);
+        }
+    }
+}
+```
