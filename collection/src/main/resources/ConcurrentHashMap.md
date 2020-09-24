@@ -37,17 +37,31 @@ static final int HASH_BITS = 0x7fffffff; // usable bits of normal node hash
 //默认没初始化的数组，用来保存元素，使用volatile修饰，确保变量的可见性和代码有序性
 transient volatile Node<K,V>[] table;
 private transient volatile Node<K,V>[] nextTable;//转移的时候用的数组
-/**
- * 用来控制表初始化和扩容的，默认值为0，当在初始化的时候指定了大小，这会将这个大小保存在sizeCtl中，大小为数组的0.75
+
+/*
+ * 用来控制表初始化和扩容的，默认值为0，当在初始化的时候指定了大小，这会将这个大小保存在sizeCtl中
  * 当为负的时候，说明表正在初始化或扩张，
  *     -1表示初始化
  *     -(1+n) n:表示活动的扩张线程
+ * sizeCtl==0时，代表table没有初始化，且table的初始容量为16
+ * sizeCtl>0时，如果table数组没有初始化，那么记录的时table的容量；如果数组已经初始化，那么其记录的是扩容阈值(数组的初始容量 * 0.75)
+ * sizeCtl==-1时，表示table正在初始化
+ * sizeCtl<0 && sizeCtl!=-1时，表示数组正在扩容，第一个扩容的线程会把扩容戳rs左移RESIZE_STAMP_SHIFT(默认16)位再加2更新设置到
+ * sizeCtl中(sizeCtl= (rs << 16) + 2)，每次一个新线程来扩容时都令sizeCtl = sizeCtl + 1，因此可根据sizeCtl计算出正在扩容的线程数,
+ * 注释中所描述的 sizeCtl = -(1+threads)是不准确的.扩容时sizeCtl有两部分组成，第一部分是扩容戳，占据sizeCtl的高有效位，长度为
+ * RESIZE_STAMP_BITS位(默认16)，剩下的低有效位长度为32-RESIZE_STAMP_BITS位(16)，每个新线程协助扩容时sizeCtl+1，
+ * 直到所有的低有效位被占满，低有效位默认占16位(最高位为符号位)，所以扩容线程数默认最大为65535
  */
-//sizeCtl==0时，代表table没有初始化，且table的初始容量为16
-//sizeCtl>0时，如果table数组没有初始化，那么记录的时table的容量；如果数组已经初始化，那么其记录的是扩容阈值(数组的初始容量 * 0.75)
-//sizeCtl==-1时，表示table正在初始化
-//sizeCtl<0 && sizeCtl!=-1时，表示数组正在扩容，-(1+n)代表有n个线程正在共同完成数组的扩容操作
 private transient volatile int sizeCtl;
+
+//代表Map中元素个数的基础计数器，当无竞争时直接使用CAS来更新此值即可
+transient volatile long baseCount; 
+
+/*
+ * 用于控制多个线程去扩容时领取扩容子任务，每个线程领取子任务时，要减去扩容步长，如果能够减成功则成功领取一个扩容子任务，
+ * `transferIndex = transferIndex - stride(扩容步长)` ，当transferIndex减到0时，代表没有可以领取的扩容子任务了
+ */
+transient volatile int transferIndex; 
 ```
 ### 重要内部类
 Node<K,V>,这是构成每个元素的基本类。key和value不允许为null
@@ -376,45 +390,68 @@ private final void treeifyBin(Node<K,V>[] tab, int index) {
     }
 }
 ```
-
 tryPresize源码
 ```java
 /*
  * Tries to presize table to accommodate the given number of elements.
+ * 扩容表为指可以容纳指定个数的大小(总是2的N次方)
+ * 假设原来的数组长度为16，则在调用tryPresize的时候，size参数的值为16 << 1 = 32，此时sizeCtl的值为12，此时的sizeCtl代表的是扩容阈值
+ * 计算出来c的值为64,则要扩容到sizeCtl≥为止
+ *  第一次扩容之后 数组长：32 sizeCtl：24
+ *  第二次扩容之后 数组长：64 sizeCtl：48
+ *  第二次扩容之后 数组长：128 sizeCtl：94 --> 这个时候才会退出扩容
  *
  * @param size number of elements (doesn't need to be perfectly accurate)
  */
 private final void tryPresize(int size) {
+    //如果此时size的值大于等于 1　<< 30的话，那么size直接设置成 MAXIMUM_CAPACITY
+    //否则进行tableSizeFor计算出最终容量大小
+    //后面table一直要扩容到这个值小于等于sizeCtrl(数组长度的3/4)才退出扩容
     int c = (size >= (MAXIMUM_CAPACITY >>> 1)) ? MAXIMUM_CAPACITY :
+        //1.5 * size + 1
         tableSizeFor(size + (size >>> 1) + 1);
     int sc;
+    //szieCtl == 0时表示table还未初始化
+    //sizeCtl > 0时表示扩容阈值
     while ((sc = sizeCtl) >= 0) {
         Node<K,V>[] tab = table; int n;
+        //如果此时table还未初始化，那么就进行初始化
+        //有可能时扩容的时候的新table
         if (tab == null || (n = tab.length) == 0) {
+            //n代表table的容量
             n = (sc > c) ? sc : c;
+            //table初始化时sizeCtl为-1
             if (U.compareAndSwapInt(this, SIZECTL, sc, -1)) {
                 try {
                     if (table == tab) {
                         @SuppressWarnings("unchecked")
+                        //声明table
                         Node<K,V>[] nt = (Node<K,V>[])new Node<?,?>[n];
                         table = nt;
+                        //sc = n - n / 4 = 3/4n = 0.75n 即扩容阈值
                         sc = n - (n >>> 2);
                     }
                 } finally {
+                    //将sizeCtl设置为扩容阈值
                     sizeCtl = sc;
                 }
             }
         }
+        //需要扩容的容量小于sizeCtl或者如果当前容量已经达到了最大值，则推出扩容
         else if (c <= sc || n >= MAXIMUM_CAPACITY)
+            //退出扩容
             break;
         else if (tab == table) {
             int rs = resizeStamp(n);
+            //sizeCtl < 0 代表此时table正在扩容
             if (sc < 0) {
                 Node<K,V>[] nt;
                 if ((sc >>> RESIZE_STAMP_SHIFT) != rs || sc == rs + 1 ||
                     sc == rs + MAX_RESIZERS || (nt = nextTable) == null ||
                     transferIndex <= 0)
                     break;
+                //扩容的线程数+1，该线程进行transfer帮忙
+                //在transfer时，sizeCtl代表
                 if (U.compareAndSwapInt(this, SIZECTL, sc, sc + 1))
                     transfer(tab, nt);
             }
