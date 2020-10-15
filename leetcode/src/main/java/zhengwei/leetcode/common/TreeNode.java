@@ -1,4 +1,4 @@
-package zhengwei.leetcode.daily;
+package zhengwei.leetcode.common;
 
 /**
  * LeetCode的常用数据结构：二叉树节点
@@ -7,9 +7,9 @@ package zhengwei.leetcode.daily;
  * @since 2020/7/7 19:27
  */
 public class TreeNode {
-    int val;
-    TreeNode left;
-    TreeNode right;
+    public int val;
+    public TreeNode left;
+    public TreeNode right;
 
     TreeNode(int x) {
         val = x;
