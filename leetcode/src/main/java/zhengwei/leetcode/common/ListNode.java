@@ -1,4 +1,4 @@
-package zhengwei.leetcode.daily;
+package zhengwei.leetcode.common;
 
 /**
  * 刷题需要用到的公用对象
@@ -7,8 +7,8 @@ package zhengwei.leetcode.daily;
  * @since 2020/6/30 19:16
  */
 public final class ListNode {
-    final int val;
-    ListNode next;
+    public final int val;
+    public ListNode next;
 
     public ListNode(int val) {
         this.val = val;
