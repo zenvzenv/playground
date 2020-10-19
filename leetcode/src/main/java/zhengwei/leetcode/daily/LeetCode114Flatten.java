@@ -1,5 +1,7 @@
 package zhengwei.leetcode.daily;
 
+import zhengwei.leetcode.common.TreeNode;
+
 import java.util.Stack;
 
 /**

@@ -1,5 +1,7 @@
 package zhengwei.leetcode.daily;
 
+import zhengwei.leetcode.common.TreeNode;
+
 /**
  * LeetCode第98题：验证是否是搜索二叉树
  *

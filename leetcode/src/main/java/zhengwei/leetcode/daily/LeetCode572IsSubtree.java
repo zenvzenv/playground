@@ -1,5 +1,7 @@
 package zhengwei.leetcode.daily;
 
+import zhengwei.leetcode.common.TreeNode;
+
 /**
  * LeetCode第572题：另一个数的子树
  *

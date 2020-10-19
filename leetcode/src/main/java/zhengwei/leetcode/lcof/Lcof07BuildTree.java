@@ -1,5 +1,7 @@
 package zhengwei.leetcode.lcof;
 
+import zhengwei.leetcode.common.TreeNode;
+
 import java.util.Arrays;
 
 /**
@@ -10,7 +12,7 @@ import java.util.Arrays;
  * @since 2020/6/6 14:01
  */
 public class Lcof07BuildTree {
-    public TreeNode buildTree(int[] preorder, int[] inorder) {
+    public TreeNode buildTree1(int[] preorder, int[] inorder) {
         int length = inorder.length;
         if (preorder.length == 0 || length == 0) {
             return null;
@@ -25,8 +27,8 @@ public class Lcof07BuildTree {
                 int[] leftPreorder = Arrays.copyOfRange(preorder, 1, i + 1);
                 int[] rightPreorder = Arrays.copyOfRange(preorder, i + 1, preorder.length);
 
-                root.left = buildTree(leftPreorder, leftInorder);
-                root.right = buildTree(rightPreorder, rightInorder);
+                root.left = buildTree1(leftPreorder, leftInorder);
+                root.right = buildTree1(rightPreorder, rightInorder);
                 break;
             }
         }

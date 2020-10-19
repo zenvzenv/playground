@@ -1,5 +1,7 @@
 package zhengwei.leetcode.daily;
 
+import zhengwei.leetcode.common.ListNode;
+
 /**
  * LeetCode21题：合并两个有序链表
  *
