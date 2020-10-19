@@ -1,5 +1,7 @@
 package zhengwei.leetcode.daily;
 
+import zhengwei.leetcode.common.ListNode;
+
 /**
  * LeetCode第二题-20190603
  * https://leetcode-cn.com/problems/add-two-numbers/
@@ -67,12 +69,5 @@ public class LeetCode02AddTwoNumbers {
         }
         if (carry!=0) current.next=new ListNode(carry);
         return dummy.next;
-    }
-}
-class ListNode {
-    int val;
-    ListNode next;
-    ListNode(int x) {
-        val = x;
     }
 }

@@ -1,5 +1,7 @@
 package zhengwei.leetcode.daily;
 
+import zhengwei.leetcode.common.TreeNode;
+
 /**
  * LeetCode第111题：平衡二叉树
  *
