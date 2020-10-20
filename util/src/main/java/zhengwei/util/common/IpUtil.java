@@ -8,20 +8,38 @@ import java.util.regex.Pattern;
 public final class IpUtil {
     // 掩码位数
 //	public static int markCode = 30;
-    private static final Pattern ipValidPattern = Pattern.compile("([0-9]{1,3}).([0-9]{1,3}).([0-9]{1,3}).([0-9]{1,3})");
+    private static final String chunkIPv4 = "([0-9]|[1-9][0-9]|1[0-9][0-9]|2[0-4][0-9]|25[0-5])";
+    private static final Pattern pattenIPv4 = Pattern.compile("^(" + chunkIPv4 + "\\.){3}" + chunkIPv4 + "$");
+    //新增IPv6的正则表达式，但是此正则表达式判断只能支持未压缩的IPv6格式，存在局限性
+    private static final String chunkIPv6 = "([0-9a-fA-F]{1,4})";
+    private static final Pattern pattenIPv6 = Pattern.compile("^(" + chunkIPv6 + ":){7}" + chunkIPv6 + "$");
 
 
-    public static boolean validIpAddress(String ip) {
-        return ipValidPattern.matcher(ip).find();
+    public static boolean validIpAddr(String ip) {
+        if (ip.contains(".")) return pattenIPv4.matcher(ip).matches();
+        else if (ip.contains(":")) return pattenIPv6.matcher(ip).matches();
+        return false;
+    }
+
+    /**
+     * 判断指定的IP是IPv4还是IPv6
+     *
+     * @param ip 需要检测的IP
+     * @return IP的版本信息
+     */
+    public static int getIpVersion(String ip) {
+        if (pattenIPv4.matcher(ip).matches()) return 4;
+        else if (pattenIPv6.matcher(ip).matches()) return 6;
+        else return -1;
     }
 
     // ip 到10 进制转换
-    public static Long ipToLong(String ip) {
-        if (!validIpAddress(ip)) {
+    public static long ipToLong(String ipv4) {
+        if (!validIpAddr(ipv4)) {
             return 0L;
         }
         long tmpIp = 0;
-        String[] tmpStrArr = ip.split("\\.");
+        String[] tmpStrArr = ipv4.split("\\.");
         if (tmpStrArr.length != 4) {
             return tmpIp;
         }
@@ -44,8 +62,8 @@ public final class IpUtil {
     }
 
     // 获取相邻 ip (30位掩码，取反)
-    public static Long getNeighborIp(Long srcIp) {
-        if (srcIp == null || srcIp == 0L) {
+    public static long getNeighborIp(long srcIp) {
+        if (srcIp == 0L) {
             return 0L;
         }
         long lastTwo = srcIp & 0b11;
@@ -140,7 +158,7 @@ public final class IpUtil {
             return null;
         }
         //子网掩码为1占了几个字节
-        int num1 = inetMask / 8;
+        int num1 = inetMask >> 3;
         //子网掩码的补位位数
         int num2 = inetMask % 8;
         int[] array = new int[4];
@@ -267,10 +285,5 @@ public final class IpUtil {
             }
         }
         return hostNumber;
-    }
-
-    public static void main(String[] args) {
-        System.out.println(ipToLong(getStartAddr("6.65.0.0", getNetMask("16"))));
-        System.out.println(ipToLong(getEndAddr("6.65.0.0", getNetMask("16"))));
     }
 }
