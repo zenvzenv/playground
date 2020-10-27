@@ -1,5 +1,7 @@
 package zhengwei.leetcode.dfsbfs;
 
+import zhengwei.leetcode.common.TreeNode;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Stack;
