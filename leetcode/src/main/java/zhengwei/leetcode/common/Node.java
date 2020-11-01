@@ -1,10 +1,12 @@
 package zhengwei.leetcode.common;
 
 /**
+ * LeetCode 二叉树节点
+ *
  * @author zhengwei AKA Awei
  * @since 2020/10/15 9:04
  */
-public class Node {
+public final class Node {
     public int val;
     public Node left;
     public Node right;
