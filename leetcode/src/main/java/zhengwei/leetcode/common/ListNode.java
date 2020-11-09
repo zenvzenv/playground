@@ -1,7 +1,7 @@
 package zhengwei.leetcode.common;
 
 /**
- * 刷题需要用到的公用对象
+ * LeetCode 单向链表节点
  *
  * @author zhengwei AKA Awei
  * @since 2020/6/30 19:16
@@ -14,7 +14,10 @@ public final class ListNode {
         this.val = val;
     }
 
-    public ListNode(int val, ListNode next) { this.val = val; this.next = next; }
+    public ListNode(int val, ListNode next) {
+        this.val = val;
+        this.next = next;
+    }
 
     @Override
     public String toString() {
@@ -24,6 +27,12 @@ public final class ListNode {
                 '}';
     }
 
+    /**
+     * 将数组转成单向链表
+     *
+     * @param arr 指定数组
+     * @return 单向链表
+     */
     public static ListNode genListNode(int[] arr) {
         ListNode root = new ListNode(arr[0]);
         ListNode temp = root;
