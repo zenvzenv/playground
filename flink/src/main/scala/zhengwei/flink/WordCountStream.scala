@@ -12,10 +12,10 @@ object WordCountStream {
     val dataStream = env.socketTextStream(parameterTool.get("host"), parameterTool.getInt("port"))
     //每条数据进程处理
     dataStream.flatMap(_.split("[ ]"))
-      .filter(_.nonEmpty)
-      .map((_, 1))
+      .filter(_.nonEmpty).disableChaining()
+      .map((_, 1)).startNewChain()
       .keyBy(0)
-      .sum(1)
+      .sum(1).slotSharingGroup("a")
       .print()
       .setParallelism(2)//默认并行度是当前电脑的核心数量
     //启动
