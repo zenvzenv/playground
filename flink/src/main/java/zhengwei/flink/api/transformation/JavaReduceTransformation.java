@@ -25,10 +25,13 @@ public class JavaReduceTransformation {
         final SingleOutputStreamOperator<Tuple2<String, Integer>> flatMap = source.flatMap((String line, Collector<Tuple2<String, Integer>> collector) -> {
             final String[] split = line.split("[ ]");
             final String key = split[0];
-            final Tuple2<String, Integer> value = Tuple2.of(key, Integer.parseInt(split[1]));
+            final int count = Integer.parseInt(split[1]);
+            final Tuple2<String, Integer> value = Tuple2.of(key, count);
             collector.collect(value);
         }).returns(Types.TUPLE(Types.STRING, Types.INT));
+
         final KeyedStream<Tuple2<String, Integer>, String> keyBy = flatMap.keyBy(t -> t.f0);
+
         final SingleOutputStreamOperator<Tuple2<String, Integer>> reduce = keyBy.reduce((Tuple2<String, Integer> t1, Tuple2<String, Integer> t2) -> {
             t1.f1 += t2.f1;
             return t1;
