@@ -32,6 +32,8 @@ public class JavaReduceTransformation {
 
         final KeyedStream<Tuple2<String, Integer>, String> keyBy = flatMap.keyBy(t -> t.f0);
 
+        //第一个参数是之前已经规约好的中间元素
+        //第二个参数是需要进行规约的元素
         final SingleOutputStreamOperator<Tuple2<String, Integer>> reduce = keyBy.reduce((Tuple2<String, Integer> t1, Tuple2<String, Integer> t2) -> {
             t1.f1 += t2.f1;
             return t1;
