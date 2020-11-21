@@ -1,6 +1,8 @@
 package zhengwei.flink.api.transformation;
 
 import org.apache.flink.api.common.typeinfo.Types;
+import org.apache.flink.api.java.functions.KeySelector;
+import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
@@ -28,7 +30,16 @@ public class JavaKeyByTransformation2 {
             collector.collect(Tuple3.of(province, city, money));
         }).returns(Types.TUPLE(Types.STRING, Types.STRING, Types.DOUBLE));
 
-        final SingleOutputStreamOperator<Tuple3<String, String, Double>> sum = flatMap.keyBy(t -> t.f0).sum(2);
+        //对于 flink 1.11.x 的 keyBy 算子，如果想要聚合多个字段的话，需要自定义 KeySelector 函数
+        //需要重写对应的 equals 和 hashCode 方法，否则汇聚的时候会有问题
+        final SingleOutputStreamOperator<Tuple3<String, String, Double>> sum = flatMap
+                .keyBy(new KeySelector<Tuple3<String, String, Double>, Tuple2<String, String>>() {
+                    @Override
+                    public Tuple2<String, String> getKey(Tuple3<String, String, Double> tuple3) throws Exception {
+                        return Tuple2.of(tuple3.f0, tuple3.f1);
+                    }
+                })
+                .sum(2);
         sum.print();
 
         env.execute();
