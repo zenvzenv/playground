@@ -18,4 +18,12 @@ public final class MyMath {
     public static int gcd(int a, int b) {
         return b == 0 ? a : gcd(b, a % b);
     }
+
+    public static void swap(int a, int b) {
+        a ^= b;
+        b ^= a;
+        a ^= b;
+        System.out.println(a);
+        System.out.println(b);
+    }
 }
