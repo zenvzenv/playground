@@ -58,7 +58,7 @@ public class SysUtils {
 						try {
 							method = Iterator.class.getMethod("hasNext");
 							// 转换hasNext的值
-							return !Boolean.valueOf(String.valueOf(method.invoke(obj)));
+							return !Boolean.parseBoolean(String.valueOf(method.invoke(obj)));
 						} catch (Exception exxx) {
 							// 以上场合不满足返回假
 							return false;
