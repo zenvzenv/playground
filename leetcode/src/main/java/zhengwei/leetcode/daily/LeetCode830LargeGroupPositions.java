@@ -18,7 +18,7 @@ public class LeetCode830LargeGroupPositions {
         for (int p = 0, q = 0; q <= cs.length; q++) {
             if (q == cs.length || cs[p] != cs[q]) {
                 if (q - p >= 3) {
-                    result.add(Arrays.asList(p, q));
+                    result.add(Arrays.asList(p, q - 1));
                 }
                 p = q;
             }
