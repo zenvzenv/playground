@@ -13,7 +13,7 @@ import java.util.Map;
  * @author zhengwei AKA zenv
  * @since 2021/1/6 20:17
  */
-public class IncrementAggreationWindowFunction {
+public class IncrementAggregationWindowFunction {
     public static void main(String[] args) throws Exception {
         final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.socketTextStream("localhost", 8888)
