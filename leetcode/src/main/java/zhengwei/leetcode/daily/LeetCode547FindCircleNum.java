@@ -54,4 +54,39 @@ public class LeetCode547FindCircleNum {
         }
         return result;
     }
+
+    public int findCircleNum(int[][] isConnected) {
+        final int provinceLength = isConnected.length;
+        int[] parent = new int[provinceLength];
+        int result = 0;
+        for (int i = 0; i < provinceLength; i++) {
+            parent[i] = i;
+        }
+        for (int i = 0; i < provinceLength; i++) {
+            for (int j = i + 1; j < provinceLength; j++) {
+                if (isConnected[i][j] == 1) {
+                    union(parent, i, j);
+                }
+            }
+        }
+        for (int i = 0; i < provinceLength; i++) {
+            if (find(parent, i) == i) {
+                result++;
+            }
+        }
+        return result;
+    }
+
+    private void union(int[] parent, int i1, int i2) {
+        final int a = find(parent, i1);
+        final int b = find(parent, i2);
+        parent[a] = b;
+    }
+
+    private int find(int[] parent, int i) {
+        if (parent[i] != i) {
+            parent[i] = find(parent, parent[i]);
+        }
+        return parent[i];
+    }
 }
