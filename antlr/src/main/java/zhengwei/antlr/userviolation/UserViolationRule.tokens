@@ -1,0 +1,15 @@
+WINDOWTIME=1
+ALLDAY=2
+INT=3
+FLOAT=4
+UNIT=5
+DO=6
+SOMETHING=7
+RANGETIME=8
+SINGLE=9
+WHO=10
+WS=11
+'windowTime'=1
+'allDay'=2
+'range'=8
+'single'=9
