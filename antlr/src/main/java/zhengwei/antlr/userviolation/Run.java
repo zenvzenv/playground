@@ -5,7 +5,6 @@ import org.antlr.v4.runtime.CodePointCharStream;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.antlr.v4.runtime.tree.ParseTreeWalker;
-import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.cep.CEP;
 import org.apache.flink.cep.PatternSelectFunction;
 import org.apache.flink.cep.PatternStream;
@@ -28,7 +27,7 @@ public class Run {
         //可以指定时间窗口，但不可对时间窗口的时间指定范围
         //原型阶段仅支持对单个行为进行检测，例如：登录系统，刻录光盘……
 //        final CodePointCharStream input = CharStreams.fromString("user range 20210511083000 20210511120000 burn CD 3");
-        final CodePointCharStream input = CharStreams.fromString("user windowTime 3 HOURS burn CD 3");
+        final CodePointCharStream input = CharStreams.fromString("user windowTime 3 HOURS burn cd 3");
         final UserViolationRuleLexer lexer = new UserViolationRuleLexer(input);
         final CommonTokenStream tokens = new CommonTokenStream(lexer);
         final UserViolationRuleParser parser = new UserViolationRuleParser(tokens);
@@ -40,21 +39,20 @@ public class Run {
         System.out.println(pattern);
 
         final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(1);
+//        env.setParallelism(1);
         final DataStream<Event> source = env.socketTextStream("localhost", 8888)
-                .filter(line -> !"".equals(line))
                 .map(line -> {
                     final String[] fields = line.split("[ ]");
                     final String userId = fields[0];
                     final String verb = fields[1];
                     final String noun = fields[2];
                     return new Event(userId, verb, noun);
-                })
-                .keyBy(Event::getUserId)
+                }).setParallelism(1)
                 .assignTimestampsAndWatermarks(
-                        WatermarkStrategy.<Event>forMonotonousTimestamps()
+                        new MyWatermarkStrategy()
                                 .withTimestampAssigner((Event e, long ts) -> System.currentTimeMillis())
-                );
+                )
+                .keyBy(Event::getUserId);
 
         source.print("source ");
         final PatternStream<Event> patternStream = CEP.pattern(source, pattern);
