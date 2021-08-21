@@ -10,11 +10,12 @@ stat: expr NEWLINE
     ;
 
 expr: expr op=('*'|'/') expr
-| expr op=('+'|'-') expr
-| INT
-| ID
-| '(' expr ')'
-;
+    | <assoc=right> expr '^' expr//右结合
+    | expr op=('+'|'-') expr
+    | INT
+    | ID
+    | '(' expr ')'
+    ;
 
 MUL : '*' ;
 DIV : '/' ;
