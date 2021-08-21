@@ -2874,12 +2874,26 @@ private[spark] class BroadcastManager(
     5. **其实一个对象或者一个变量是通过闭包的方式被调用的话，那么这些对象或变量就会通过网络发送给其他节点上进行装载，通过网络传输势必会涉及到序列化**
 ## Worker、Executor、Job、Stage、Task和Partition的关系
 * 一个物理节点上可以有一个或多个Worker，Worker其实是一个JVM进程
-* 一个Executor可以并行执行多个Task，实际上Executor是一个JVM进程，在Spark@Yarn的模式下，其进程名为CoarseGrainedExecutorBackend，一个CoarseGrainedExecutorBackend中有且仅有一个Executor对象，Task是Executor进程中的一个线程，一个Task至少要独占用Executor中的一个Vcore
-* Executor的个数是由 `--num-executors` 来指定，Executor中有多少个核心是有 `--executor-cores` 来指定的，一个Task要占几个核心是有 `--conf spark.task.cores=1` 来配置，默认一个Task占用一个core
-* 一个Application中的**`最大并行度 = Executor数目 * (每个Executor核心数 / 每个Task要占用的核心数)`**，注意：如果Spark读取的是HDFS上的文件时，Spark会按照一个block来划分分区，比如一个文件的大小时1345MB，一个block块的大小是128MB，那么Spark会生成1345MB/128M=11个Partition
-* 一个Job中会有一个或多个Stage，一个Stage中会有一个或多个Task，如果一次提交的Task过多，超出了**`最大并行度=Executor数目*(每个Executor核心数/每个Task要占用的核心数)`**的话，那么Task会被分批次执行，每次执行总cores个任务，等有cores空闲下来的时候再去执行剩余的Task
-* 如果一个Executor调用了一个工具类的静态方法，在Executor端调用，那就是在Executor端对这个类首次使用，那么Executor所在的JVM进程就会去加载该类并进行初始化操作(该类所在jar应该是提前通过--jars参数来指定，并发送到了各个Executor中)，
-  因为是静态方法，是属于类的，所以会被加载到JVM的方法区中(对于Hotspot虚拟机来说)，也就只存在一份。
+
+* 一个Executor可以并行执行多个Task，**实际上Executor是一个计算对象**，**ExecutorBackend是真正的JVM进程**，在Spark@Yarn的模式下，
+其进程名为CoarseGrainedExecutorBackend，一个CoarseGrainedExecutorBackend中有且仅有一个Executor对象，
+Task是Executor进程中的一个线程，一个Task至少要独占用Executor中的一个Vcore
+
+* Executor的个数是由 `--num-executors` 来指定，Executor中有多少个核心是有 `--executor-cores` 来指定的，
+一个Task要占几个核心是有 `--conf spark.task.cores=1` 来配置，默认一个Task占用一个core
+
+* 一个Application中的**`最大并行度 = Executor数目 * (每个Executor核心数 / 每个Task要占用的核心数)`**，
+注意：如果Spark读取的是HDFS上的文件时，Spark 会按照一个 block 来划分分区，比如一个文件的大小时1345MB，
+一个block块的大小是128MB，那么Spark会生成1345MB/128M=11个Partition
+
+* 一个Job中会有一个或多个Stage，一个Stage中会有一个或多个Task，如果一次提交的Task过多，
+超出了 **最大并行度=Executor数目 * (每个Executor核心数 / 每个Task要占用的核心数)** 的话，那么Task会被分批次执行，
+每次执行总 cores 个任务，等有 cores 空闲下来的时候再去执行剩余的Task
+
+* 如果一个Executor调用了一个工具类的静态方法，在Executor端调用，那就是在Executor端对这个类首次使用，
+那么Executor所在的JVM进程就会去加载该类并进行初始化操作(该类所在jar应该是提前通过--jars参数来指定，并发送到了各个Executor中)，
+因为是静态方法，是属于类的，所以会被加载到JVM的方法区中(对于HotSpot虚拟机来说)，也就只存在一份。
+
 ## Spark SQL笔记
 1. 在Spark1.x中，使用SQLContext是SparkSQL的操作入口，在Spark2.x中，改用了SparkSession作为SparkSQL的操作入口
 2. UDF(user define function):
