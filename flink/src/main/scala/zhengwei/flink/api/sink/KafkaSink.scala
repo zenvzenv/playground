@@ -4,7 +4,7 @@ import java.util.Properties
 
 import org.apache.flink.api.common.serialization.SimpleStringSchema
 import org.apache.flink.streaming.api.scala._
-import org.apache.flink.streaming.connectors.kafka.{FlinkKafkaConsumer011, FlinkKafkaProducer011}
+import org.apache.flink.streaming.connectors.kafka.{FlinkKafkaConsumer, FlinkKafkaProducer}
 
 /**
  * @author zhengwei AKA zenv
@@ -14,7 +14,7 @@ object KafkaSink {
   def main(args: Array[String]): Unit = {
     val env = StreamExecutionEnvironment.getExecutionEnvironment
     val props = new Properties
-    val source = env.addSource(new FlinkKafkaConsumer011[String]("testTopic", new SimpleStringSchema(), props))
+    val source = env.addSource(new FlinkKafkaConsumer[String]("testTopic", new SimpleStringSchema(), props))
     source
       .map(line => {
         val fields = line.split("[,]")
@@ -23,7 +23,7 @@ object KafkaSink {
       .keyBy(tuple2 => tuple2._1)
       .sum(1)
       .map(item => item._1 + "_" + item._2)
-      .addSink(new FlinkKafkaProducer011[String]("localhost:9092", "testTopic", new SimpleStringSchema()))
+      .addSink(new FlinkKafkaProducer[String]("localhost:9092", "testTopic", new SimpleStringSchema()))
 
     env.execute()
   }
