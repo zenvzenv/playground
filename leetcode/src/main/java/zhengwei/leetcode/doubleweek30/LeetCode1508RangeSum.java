@@ -31,4 +31,8 @@ public class LeetCode1508RangeSum {
         }
         return res;
     }
+
+    public static void main(String[] args) {
+        System.out.println(1e9+7);
+    }
 }
