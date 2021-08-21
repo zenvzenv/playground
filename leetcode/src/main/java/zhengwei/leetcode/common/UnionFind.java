@@ -34,7 +34,9 @@ public final class UnionFind {
                 rootA ^= rootB;
             }
             parent[rootB] = rootA;
-            if (rank[rootA] == rank[rootB]) rank[rootA] += 1;
+            if (rank[rootA] == rank[rootB]) {
+                rank[rootA] += 1;
+            }
         }
     }
 

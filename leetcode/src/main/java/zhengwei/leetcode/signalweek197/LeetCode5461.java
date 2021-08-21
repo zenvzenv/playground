@@ -41,4 +41,19 @@ public class LeetCode5461 {
         }
         return res;
     }
+
+    public int numSub3(String s) {
+        final char[] chars = s.toCharArray();
+        int res = 0;
+        for (int i = 0; i < chars.length; i++) {
+            if (chars[i] == '1') {
+                int j = i;
+                while (j <= chars.length && chars[j] == '1') j++;
+                int len = j - 1;
+                res += len * (len + 1) / 2;
+                res = res % 1000000007;
+            }
+        }
+        return res;
+    }
 }
