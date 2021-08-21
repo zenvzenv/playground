@@ -11,7 +11,7 @@ aggregate数据，等数据aggregate好以后进行reduce()(Spark可能是后续
 如果我们将map端划分数据、持久化数据的过程称为shuffle write，而将reducer读入数据、aggregate数据的过程称为shuffle read。
 那么在Spark中，**问题就变为怎么在job的逻辑或者物理执行图中加入shuffle write和shuffle read的处理逻辑？
 以及两个处理逻辑应该怎么高效实现？**
-## HashShuffle
+## HashShuffle (Spark 1.6 之前使用，Spark 2.0 已经废弃)
 shuffle write的任务很简单：将数据partition好，并持久化，之所以要持久化，一方面减少内存的压力，另一方面是为了fault-tolerance。
 ### Shuffle Write
 shuffle write的任务很简单，那么实现也很简单：该stage的finalRDD每输出一个record就将其partition并持久化，如下图所示：

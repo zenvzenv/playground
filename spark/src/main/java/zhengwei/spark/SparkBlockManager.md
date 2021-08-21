@@ -1,0 +1,2 @@
+#SparkBlockManager
+Spark的BlockManager采用的是主从架构。
