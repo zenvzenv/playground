@@ -5,7 +5,7 @@ import java.util.Properties
 import org.apache.flink.api.common.serialization.SimpleStringSchema
 import org.apache.flink.api.java.utils.ParameterTool
 import org.apache.flink.streaming.api.scala._
-import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer011
+import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer
 
 /**
  * kafka 数据源
@@ -18,7 +18,7 @@ object KafkaSource {
     properties.setProperty("bootstrap.servers", parameterTool.get("bootstrapServers"))
     properties.setProperty("group.id", parameterTool.get("groupId"))
     //自动维护偏移量
-    env.addSource(new FlinkKafkaConsumer011[String]("sensor", new SimpleStringSchema(), properties)).print()
+    env.addSource(new FlinkKafkaConsumer[String]("sensor", new SimpleStringSchema(), properties)).print()
     env.execute("kafka source")
   }
 }

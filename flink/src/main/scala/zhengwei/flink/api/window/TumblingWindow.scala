@@ -8,7 +8,7 @@ import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.windowing.assigners.EventTimeSessionWindows
 import org.apache.flink.streaming.api.windowing.time.Time
 import org.apache.flink.streaming.api.windowing.windows.TimeWindow
-import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer011
+import org.apache.flink.streaming.connectors.kafka.FlinkKafkaConsumer
 
 /**
  * window 并不是一个对数据的操作，类似于 keyBy 操作一样，对数据进行了分桶操作，分完窗口之后需要跟上一个汇聚操作才能构成一个完整的操作。
@@ -25,7 +25,7 @@ object TumblingWindow {
     properties.setProperty("group.id", parameterTool.get("groupId"))
     val topic = parameterTool.get("topic")
     //自动维护偏移量
-    val source = env.addSource(new FlinkKafkaConsumer011[String](topic, new SimpleStringSchema(), properties))
+    val source = env.addSource(new FlinkKafkaConsumer[String](topic, new SimpleStringSchema(), properties))
     val map: WindowedStream[(String, Int), String, TimeWindow] = source
       .map(line => {
         val strings = line.split("[ ]")
