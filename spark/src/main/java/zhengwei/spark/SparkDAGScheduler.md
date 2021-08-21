@@ -61,7 +61,7 @@ org.apache.spark.scheduler.DAGScheduler.handleJobSubmitted
       case scala.util.Failure(exception) =>
         logInfo("Job %d failed: %s, took %f s".format
           (waiter.jobId, callSite.shortForm, (System.nanoTime - start) / 1e9))
-        // SPARK-8644: Include user stack trace in exceptions coming from DAGScheduler.
+        // SPARK-8644: Include user stack trace in exceptions coming from DAGScheduler. 
         val callerStackTrace = Thread.currentThread().getStackTrace.tail
         exception.setStackTrace(exception.getStackTrace ++ callerStackTrace)
         throw exception
@@ -109,6 +109,7 @@ DAGSchedulerEventProcessLoop中，DAGSchedulerEventProcessLoop中会去循环监
       // New stage creation may throw an exception if, for example, jobs are run on a
       // HadoopRDD whose underlying HDFS files have been deleted.
       //调用createResultStage创建ResultStage对象，task的数量和partition的数量保持一致
+      //此finalStage是整个job的最后一个stage，后续会对此stage进行迭代，向前迭代出所有的stage
       finalStage = createResultStage(finalRDD, func, partitions, jobId, callSite)
     } catch {
       case e: BarrierJobSlotsNumberCheckFailed =>
@@ -143,7 +144,7 @@ DAGSchedulerEventProcessLoop中，DAGSchedulerEventProcessLoop中会去循环监
     }
     // Job submitted, clear internal data.
     barrierJobIdToNumTasksCheckFailures.remove(jobId)
-
+    //生成一个激活job
     val job = new ActiveJob(jobId, finalStage, callSite, listener, properties)
     clearCacheLocs()
     logInfo("Got job %s (%s) with %d output partitions".format(
@@ -153,13 +154,51 @@ DAGSchedulerEventProcessLoop中，DAGSchedulerEventProcessLoop中会去循环监
     logInfo("Missing parents: " + getMissingParentStages(finalStage))
 
     val jobSubmissionTime = clock.getTimeMillis()
+    //DAGScheduler中使用HashMap来缓存活动的job，key是jobId，value是ActiveJob
     jobIdToActiveJob(jobId) = job
+    //DAGScheduler使用HashSet来缓存活动的job
     activeJobs += job
+    //把当前job设置成激活
     finalStage.setActiveJob(job)
+    //将之前缓存的该job的stage拿出来
     val stageIds = jobIdToStageIds(jobId).toArray
     val stageInfos = stageIds.flatMap(id => stageIdToStage.get(id).map(_.latestInfo))
+    //向总线提交SparkListenerJobStart去开始一个job
     listenerBus.post(
       SparkListenerJobStart(job.jobId, jobSubmissionTime, stageInfos, properties))
+    //提交stage
     submitStage(finalStage)
   }
+  private def createResultStage(
+      rdd: RDD[_],
+      func: (TaskContext, Iterator[_]) => _,
+      partitions: Array[Int],
+      jobId: Int,
+      callSite: CallSite): ResultStage = {
+    checkBarrierStageWithDynamicAllocation(rdd)
+    checkBarrierStageWithNumSlots(rdd)
+    checkBarrierStageWithRDDChainPattern(rdd, partitions.toSet.size)
+    val parents = getOrCreateParentStages(rdd, jobId)
+    val id = nextStageId.getAndIncrement()
+    val stage = new ResultStage(id, rdd, func, partitions, parents, jobId, callSite)
+    stageIdToStage(id) = stage
+    updateJobIdStageIdMaps(jobId, stage)
+    stage
+  }
+  private def updateJobIdStageIdMaps(jobId: Int, stage: Stage): Unit = {
+    @tailrec
+    def updateJobIdStageIdMapsList(stages: List[Stage]) {
+      if (stages.nonEmpty) {
+        val s = stages.head
+        s.jobIds += jobId
+        //递归调用updateJobIdStageIdMapsList，把job中的所有stage缓存下来
+        jobIdToStageIds.getOrElseUpdate(jobId, new HashSet[Int]()) += s.id
+        val parentsWithoutThisJobId = s.parents.filter { ! _.jobIds.contains(jobId) }
+        updateJobIdStageIdMapsList(parentsWithoutThisJobId ++ stages.tail)
+      }
+    }
+    updateJobIdStageIdMapsList(List(stage))
+  }
 ```
+## 划分Stage
+1. 首先创建ResultStage，createResultStage

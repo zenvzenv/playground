@@ -9,7 +9,7 @@ private val settings = new ConcurrentHashMap[String, String]()
 * 使用SparkConf提供的API来设置
 * 从其他SparkConf中复制
 ### 1.1 系统属性中的配置
-在SparkConf的构造函数中，有一个Boolean的属性loadDefaults，当loadDefaults为true时，Spark会从系统属性中获取配置信息，，loadDefaults默认为true
+在SparkConf的构造函数中，有一个Boolean的属性loadDefaults，当loadDefaults为true时，Spark会从系统属性中获取配置信息，loadDefaults默认为true
 ```scala
 if (loadDefaults) {
   loadFromSystemProperties(false)
@@ -55,7 +55,8 @@ private[spark] def set(key: String, value: String, silent: Boolean): SparkConf =
   }
 ```
 ### 1.3 克隆SparkConf配置
-最后一种配置Spark的方法就是克隆一个SparkConf。有些情况下，有多个组件需要使用到SparkConf实例，例如，现在有一个SparkConf实例A，这时组件O1需要使用到A中的配置信息，组件O2也需要使用到A信息，那我们最先想到的解决方案就是将SparkConf的实例设置成全局变量或者通过参数的形式传递出去，但是这回引发并发问题，虽然SparkConf内部的数据结构使用ConcurrentHasMap确保了线程安全问题，而且ConcurrentHashMap被证明在高并发下的性能表现不错，但只要有并发存在就会有性能损耗问题。
+最后一种配置Spark的方法就是克隆一个SparkConf。有些情况下，有多个组件需要使用到SparkConf实例，例如，现在有一个SparkConf实例A，
+这时组件O1需要使用到A中的配置信息，组件O2也需要使用到A信息，那我们最先想到的解决方案就是将SparkConf的实例设置成全局变量或者通过参数的形式传递出去，但是这回引发并发问题，虽然SparkConf内部的数据结构使用ConcurrentHasMap确保了线程安全问题，而且ConcurrentHashMap被证明在高并发下的性能表现不错，但只要有并发存在就会有性能损耗问题。
 Spark采用了另外一种方式，就是再拷贝一封SparkConf实例，即新创建一个SparkConf实例B，将A中的配置信息全部复制给B，这种方式虽然不优雅，复制的SparkConf实例可能会到处都是，但不存在并发问题。
 现在我们来看看SparkConf的构造器的详细情况。
 ```scala
@@ -555,7 +556,7 @@ public void channelRead(ChannelHandlerContext ctx, Object request) throws Except
     requestHandler.handle((RequestMessage) request);
   //如果处理的消息是ResponseMessage的话则交由TransportResponseHandler做进一步处理
   } else if (request instanceof ResponseMessage) {
-    responseHandler.handle((ResponseMessage) request);
+    responseHandler.handle(( ) request);
   } else {
     ctx.fireChannelRead(request);
   }
