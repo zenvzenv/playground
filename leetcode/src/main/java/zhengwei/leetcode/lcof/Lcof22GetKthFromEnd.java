@@ -1,5 +1,7 @@
 package zhengwei.leetcode.lcof;
 
+import zhengwei.leetcode.common.ListNode;
+
 /**
  * LeetCode第22题：链表中倒数第k个节点
  *

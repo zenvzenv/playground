@@ -1,5 +1,7 @@
 package zhengwei.leetcode.lcof;
 
+import zhengwei.leetcode.common.ListNode;
+
 /**
  * 剑指offer第18题：删除链表的节点
  *
