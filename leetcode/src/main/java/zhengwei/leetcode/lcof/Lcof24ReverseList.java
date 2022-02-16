@@ -1,5 +1,7 @@
 package zhengwei.leetcode.lcof;
 
+import zhengwei.leetcode.common.ListNode;
+
 import java.util.Stack;
 
 /**

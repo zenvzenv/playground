@@ -1,5 +1,7 @@
 package zhengwei.leetcode.lcof;
 
+import zhengwei.leetcode.common.TreeNode;
+
 import java.util.LinkedList;
 import java.util.Queue;
 
