@@ -15,9 +15,12 @@ import java.io.PrintWriter;
  */
 public class ASMPrint {
     public static void main(String[] args) throws IOException {
-        final String className = "zhengwei/asm/sample/HelloWorld";
+        // 类全限定名
+        // "zhengwei/asm/sample/HelloWorld"
+        final String className = args[0];
+        // true or false
+        final boolean asmCode = Boolean.parseBoolean(args[1]);
         final int parsingOptions = ClassReader.SKIP_FRAMES | ClassReader.SKIP_DEBUG;
-        boolean asmCode = false;
 
         final Printer printer = asmCode ? new ASMifier() : new Textifier();
         final PrintWriter printWriter = new PrintWriter(System.out, true);
