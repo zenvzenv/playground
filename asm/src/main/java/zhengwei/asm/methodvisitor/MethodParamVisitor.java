@@ -7,6 +7,8 @@ import org.objectweb.asm.MethodVisitor;
 import static org.objectweb.asm.Opcodes.*;
 
 /**
+ * 使用 Type 类来进行进入和退出方法添加代码的操作
+ *
  * @author zhengwei AKA zenv
  * @since 2022/7/20 19:49
  */
@@ -17,14 +19,14 @@ public class MethodParamVisitor extends ClassVisitor {
 
     @Override
     public MethodVisitor visitMethod(int access, String name, String desc, String signature, String[] exceptions) {
-        final MethodVisitor mv = super.visitMethod(access, name, desc, signature, exceptions);
+        MethodVisitor mv = super.visitMethod(access, name, desc, signature, exceptions);
         if (null != mv && !"<inti>".equals(name)) {
             // 判断方法是不是抽象方法
             final boolean isAbstract = (access & ACC_ABSTRACT) == ACC_ABSTRACT;
             // 判断方法是不是本地方法
             final boolean isNative = (access & ACC_NATIVE) == ACC_NATIVE;
             if (!isAbstract && !isNative) {
-//                mv = new MethodParamAdapter(api, mv);
+                mv = new MethodParamAdapter(api, mv, access, name, desc);
             }
         }
         return mv;
@@ -66,34 +68,56 @@ public class MethodParamVisitor extends ClassVisitor {
                 super.visitVarInsn(opcode, slotIndex);
                 if (sort == Type.BOOLEAN) {
                     printBoolean();
-                }
-                else if (sort == Type.CHAR) {
+                } else if (sort == Type.CHAR) {
                     printChar();
-                }
-                else if (sort == Type.BYTE || sort == Type.SHORT || sort == Type.INT) {
+                } else if (sort == Type.BYTE || sort == Type.SHORT || sort == Type.INT) {
                     printInt();
-                }
-                else if (sort == Type.FLOAT) {
+                } else if (sort == Type.FLOAT) {
                     printFloat();
-                }
-                else if (sort == Type.LONG) {
+                } else if (sort == Type.LONG) {
                     printLong();
-                }
-                else if (sort == Type.DOUBLE) {
+                } else if (sort == Type.DOUBLE) {
                     printDouble();
-                }
-                else if (sort == Type.OBJECT && "Ljava/lang/String;".equals(descriptor)) {
+                } else if (sort == Type.OBJECT && "Ljava/lang/String;".equals(descriptor)) {
                     printString();
-                }
-                else if (sort == Type.OBJECT) {
+                } else if (sort == Type.OBJECT) {
                     printObject();
-                }
-                else {
+                } else {
                     printMessage("No Support");
                 }
                 slotIndex += size;
             }
             super.visitCode();
+        }
+
+        // 方法退出时需要进行的操作
+        @Override
+        public void visitInsn(int opcode) {
+            //方法正常退出和异常退出
+            if ((opcode >= IRETURN && opcode <= RETURN) || opcode == ATHROW) {
+                printMessage("method exit:");
+                if (opcode == IRETURN) {
+                    super.visitInsn(DUP);
+                    printInt();
+                } else if (opcode == FRETURN) {
+                    super.visitInsn(DUP);
+                    printFloat();
+                } else if (opcode == LRETURN) {
+                    super.visitInsn(DUP2);
+                    printLong();
+                } else if (opcode == DRETURN) {
+                    super.visitInsn(DUP2);
+                    printDouble();
+                } else if (opcode == ARETURN) {
+                    super.visitInsn(DUP);
+                    printObject();
+                } else if (opcode == RETURN) {
+                    printMessage("    return void");
+                } else {
+                    printMessage("    abnormal return");
+                }
+            }
+            super.visitInsn(opcode);
         }
 
         private void printBoolean() {
