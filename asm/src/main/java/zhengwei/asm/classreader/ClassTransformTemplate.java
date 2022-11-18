@@ -22,7 +22,7 @@ public class ClassTransformTemplate {
 
         int api = Opcodes.ASM5;
         // 在此处实现不同的业务逻辑
-        final ClassVisitor cv = new ClassChangeVersionVisitor(api, cw);
+        final ClassVisitor cv = new ClassAddMethodVisitor(api, cw, Opcodes.ACC_PUBLIC, "mul", "(II)I", null, null);
 
         int parsingOptions = ClassReader.SKIP_FRAMES | ClassReader.SKIP_DEBUG;
         cr.accept(cv, parsingOptions);

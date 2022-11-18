@@ -5,7 +5,11 @@ package zhengwei.asm.sample;
  * @since 2022/6/28
  */
 public class HelloWorld {
-    public void test() {
-        System.out.println("hello world");
+    public int add(int a, int b) {
+        return a + b;
+    }
+
+    public int sub(int a, int b) {
+        return a - b;
     }
 }
