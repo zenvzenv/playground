@@ -23,6 +23,7 @@
         <module>collection</module>
         <module>hadoop</module>
         <module>asm</module>
+        <module>disruptor</module>
     </modules>
 
     <properties>
