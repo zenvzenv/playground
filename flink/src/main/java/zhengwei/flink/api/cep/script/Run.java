@@ -23,7 +23,7 @@ public class Run {
         Pattern<String, String> pattern = ScriptEngine.getPattern(
                 "import org.apache.flink.cep.pattern.Pattern\n" +
                         "import org.apache.flink.streaming.api.windowing.time.Time\n" +
-                        "import net.zhongfu.script.SimpleConditionTest1\n" +
+                        "import zhengwei.flink.api.cep.script.SimpleConditionTest1\n" +
                         "def getPattern(){\n" +
                         "    SimpleConditionTest1 simpleWhere = new SimpleConditionTest1();\n" +
                         "    return Pattern.<String>begin(\"start\")\n" +
